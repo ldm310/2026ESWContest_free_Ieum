@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Models and caches
+.cache/
+models/
+*.bin
+*.pt
+*.onnx
+
+# Runtime outputs
+output/
+*.log
+
+# Audio data
+*.wav
+*.mp3
+*.flac
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Generated packages
+*.zip
+
+# Temporary files
+*.tmp
+*.swp
+*.orig
+
+# Reference-only upstream source
+whisperlive_reference/
