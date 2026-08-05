@@ -1,84 +1,83 @@
 #!/usr/bin/env python3
-"""
-realtime_doa.py  -  실시간 DOA 방향 출력 래퍼 (준형님용 stub)
-
-목적:
-  준형님의 기존 함수를 그대로 써서, 4채널 마이크 입력을 실시간으로 받아
-  '방향(direction 단위벡터) + 방위각/고도각'을 매 순간 출력한다.
-  pipeline.py 는 WAV 파일 통째로 처리하지만, 이건 마이크 스트림을 조각내서
-  같은 함수들(estimate_bem_doa 등)을 반복 호출할 뿐이다.
-
-준형님이 채울 부분은 3곳(아래 TODO)뿐:
-  1) 마이크 장치 index / 채널 순서(panel 매핑)
-  2) BEM 테이블 경로와 panel_indices
-  3) 결과를 어디로 보낼지 (지금은 print + 공유변수. 병현 연동은 맨 아래 설명)
-
-병현 연동:
-  이 파일의 latest_direction (전역, [x,y,z] 단위벡터)이 곧 estimate.direction 이다.
-  병현 stage3_direction_vector.py 에서
-        q = query_to_unit(...)   →   q = get_latest_direction()
-  로 바꾸면 그대로 이어진다. (같은 프로세스로 합치거나, 소켓/큐로 넘겨도 됨)
-
-설치:  py -3.11 -m pip install sounddevice numpy scipy h5py soundfile
-실행:  py -3.11 realtime_doa.py
-"""
 from __future__ import annotations
 
+import socket
+import struct
 import threading
 import queue
 
 import numpy as np
 import sounddevice as sd
 
-# 준형님 기존 모듈 (같은 폴더에 두고 실행)
-from stft import stft_multichannel, normalized_spatial_covariance
-from bem import load_bem_dictionary
+# ── 준형님 원본 모듈 (같은 폴더에 두고 실행) ──
+from stft import stft_multichannel, normalized_spatial_covariance, istft_single
+from bem import load_bem_dictionary, load_bem_steering
 from doa import estimate_bem_doa
+from beamform import (
+    hybrid_weights, apply_mvdr, normalize_steering, loaded_mixture_covariance,
+)
 
-# ── 설정 (pipeline.py 와 동일하게 맞춤) ──────────────────────────
+# ── 설정 (준형님 pipeline.py 상수와 동일하게 맞춤) ──
 SAMPLE_RATE = 16000
 N_FFT, HOP = 512, 128
 DOA_MIN_HZ, DOA_MAX_HZ = 1000.0, 5000.0
+MVDR_MIN_HZ = 1250.0
 GRID_STEP_DEG = 5.0
-CHUNK_SEC = 0.5                      # 몇 초마다 방향을 새로 추정할지 (0.3~1.0 권장)
+DIAGONAL_LOADING = 1e-2
+CHUNK_SEC = 0.5                      # 몇 초 조각마다 방향+빔포밍을 갱신할지
 
-# TODO(1): 마이크 장치와 채널
-#   - `python -c "import sounddevice as sd; print(sd.query_devices())"` 로 장치 index 확인
-#   - 4채널 인터페이스여야 함. 채널 물리 순서가 panel_indices 순서와 같아야 한다.
+# 병현에게 mono 오디오를 보낼 UDP 주소 (같은 노트북 = localhost)
+AUDIO_UDP_ADDR = ("127.0.0.1", 50007)
+
+# TODO(1): 마이크 장치 / 채널
+#   `py -3.11 -c "import sounddevice as sd; print(sd.query_devices())"` 로 index 확인.
+#   4채널 입력 장치여야 하고, 채널 물리 순서가 panel_indices 순서와 같아야 한다.
 DEVICE = None                        # 예: 3  (None이면 기본 입력장치)
 CHANNELS = 4
 
-# TODO(2): BEM 테이블 경로 / 패널 인덱스 (물리 마이크 ↔ BEM 인덱스 매핑)
+# TODO(2): BEM 테이블 경로 / 패널 인덱스 (상자에 붙인 마이크 4개의 채널 순서와 일치!)
 BEM_TABLE = "sample_data/bem_table_reduced.h5"
-PANEL_INDICES = np.array([0, 1, 2, 3], dtype=np.int64)   # 실물 배선과 반드시 일치시킬 것
+PANEL_INDICES = np.array([0, 1, 2, 3], dtype=np.int64)
 
-# ── 공유 상태 (병현 쪽에서 읽어감) ──
-latest_direction = np.array([1.0, 0.0, 0.0])   # [x,y,z] 단위벡터, 기본=정면
-latest_lock = threading.Lock()
+# ── 병현이 읽어가는 공유 방향값 ──
+_latest_direction = np.array([1.0, 0.0, 0.0])
+_dir_lock = threading.Lock()
 
 def get_latest_direction() -> np.ndarray:
-    with latest_lock:
-        return latest_direction.copy()
+    """최신 방향 단위벡터 [x,y,z]. = 준형님 estimate.direction."""
+    with _dir_lock:
+        return _latest_direction.copy()
 
 
-# ── 마이크 캡처 → 큐 ──
-audio_q: "queue.Queue[np.ndarray]" = queue.Queue()
-_buffer = []
+# ── 마이크 캡처 → 큐 (0.5초 조각) ──
+_audio_q: "queue.Queue[np.ndarray]" = queue.Queue()
+_buffer: list[np.ndarray] = []
 _frames_per_chunk = int(SAMPLE_RATE * CHUNK_SEC)
 
 def _audio_callback(indata, frames, time_info, status):
     if status:
         print("[audio]", status, flush=True)
     _buffer.append(indata.copy())
-    total = sum(len(b) for b in _buffer)
-    if total >= _frames_per_chunk:
+    if sum(len(b) for b in _buffer) >= _frames_per_chunk:
         chunk = np.concatenate(_buffer, axis=0)[:_frames_per_chunk]
         _buffer.clear()
-        audio_q.put(chunk)          # [samples, 4] float32
+        _audio_q.put(chunk)             # [samples, 4] float32
 
 
-def main():
-    # 사전(dictionary)은 시작할 때 한 번만 로드 (pipeline.py 와 동일 인자)
+def _send_mono_udp(sock: socket.socket, mono: np.ndarray) -> None:
+    """빔포밍된 mono 오디오를 UDP로 전송. 헤더(길이) + float32 payload.
+    큰 조각은 여러 패킷으로 쪼갬(UDP 안전 크기)."""
+    data = mono.astype(np.float32).tobytes()
+    MAX = 1400 * 4                      # 대략 안전한 payload 크기
+    offset = 0
+    total = len(data)
+    while offset < total:
+        part = data[offset:offset + MAX]
+        sock.sendto(struct.pack("<II", total, offset) + part, AUDIO_UDP_ADDR)
+        offset += len(part)
+
+
+def main() -> None:
     print("BEM 사전 로딩...", flush=True)
     dictionary = load_bem_dictionary(
         BEM_TABLE, PANEL_INDICES,
@@ -87,28 +86,41 @@ def main():
     )
     print("완료. 마이크 스트림 시작. (Ctrl+C 종료)", flush=True)
 
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     stream = sd.InputStream(
         samplerate=SAMPLE_RATE, device=DEVICE, channels=CHANNELS,
         dtype="float32", blocksize=HOP, callback=_audio_callback,
     )
     with stream:
         while True:
-            audio_chunk = audio_q.get()          # [samples, 4]
-            # ── pipeline.py 의 DOA 부분과 동일 ──
+            audio_chunk = _audio_q.get()     # [samples, 4]
+
+            # ── (A) DOA: 준형님 함수 그대로 ──
             freqs, spectra = stft_multichannel(audio_chunk, SAMPLE_RATE, n_fft=N_FFT, hop=HOP)
             band = (freqs >= DOA_MIN_HZ) & (freqs <= DOA_MAX_HZ)
             csm = normalized_spatial_covariance(spectra[:, band, :])
             est = estimate_bem_doa(csm, dictionary)
 
-            with latest_lock:
-                global latest_direction
-                latest_direction = np.asarray(est.direction, dtype=np.float64)
+            with _dir_lock:
+                global _latest_direction
+                _latest_direction = np.asarray(est.direction, dtype=np.float64)
 
-            # TODO(3): 출력. 지금은 콘솔. 병현 연동 시 get_latest_direction() 로 읽거나
-            #          소켓/파이프/멀티프로세싱 큐로 est.direction 을 넘긴다.
+            # ── (B) Beamforming: 준형님 함수 그대로 (pipeline.separate 와 동일) ──
+            _, steering = load_bem_steering(
+                BEM_TABLE, PANEL_INDICES, est.doa_index,
+                sample_rate=SAMPLE_RATE, n_fft=N_FFT)
+            mixture_csm = loaded_mixture_covariance(spectra, diagonal_loading=DIAGONAL_LOADING)
+            mvdr_mask = freqs >= MVDR_MIN_HZ
+            weights = hybrid_weights(normalize_steering(steering), mixture_csm, mvdr_mask=mvdr_mask)
+            mono = istft_single(apply_mvdr(spectra, weights), SAMPLE_RATE,
+                                n_fft=N_FFT, hop=HOP, expected_samples=audio_chunk.shape[0])
+
+            # ── (C) 병현에게 전달: 방향은 공유변수, mono 오디오는 UDP ──
+            _send_mono_udp(sock, mono)
+
             print(f"dir=[{est.direction[0]:+.2f},{est.direction[1]:+.2f},{est.direction[2]:+.2f}] "
-                  f"az={est.azimuth_deg:6.1f}  el={est.elevation_deg:6.1f}  score={est.score:.3f}",
-                  flush=True)
+                  f"az={est.azimuth_deg:6.1f} el={est.elevation_deg:6.1f}  "
+                  f"mono {mono.shape[0]} samples 전송", flush=True)
 
 
 if __name__ == "__main__":
