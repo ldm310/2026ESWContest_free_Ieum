@@ -26,3 +26,16 @@ PANEL_INDICES = np.array([0, 1, 2, 3], dtype=np.int64)
 `PANEL_INDICES`는 **상자에 붙인 마이크 4개의 물리 순서**와 같아야 한다고 합니다.
 (네 개의 마이크 자리가 각각 몇 번 채널인지 준형님이 확정해 주세요.)
 ---
+
+논외로, 제가 보기 편하려고 정리한 tts 실행 시 필요한 사항들입니다 :
+
+파일 구조 : 
+
+Test_single_speaker_stt/ test_single_speaker.py stt/
+test_single_speaker.py
+stt/ #stt 파일 전체 복사
+
+설치 :
+py -3.11 -m pip install sounddevice
+py -3.11 -m pip install -r stt/requirements-core.txt
+py -3.11 test_single_speaker.py
