@@ -1,0 +1,8 @@
+numpy>=2.0
+scipy>=1.13
+h5py>=3.10
+soundfile>=0.12
+torch>=2.2
+nara_wpe>=0.0.11
+silero-vad>=5.0
+matplotlib>=3.8

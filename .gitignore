@@ -57,3 +57,8 @@ htmlcov/
 
 # Reference-only upstream source
 whisperlive_reference/
+
+# BEM scattering table (463MB, exceeds GitHub 100MB limit)
+*.h5
+sample_data/
+outputs/
