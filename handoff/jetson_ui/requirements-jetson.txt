@@ -1,0 +1,6 @@
+numpy>=1.24,<2.0
+scipy>=1.10
+h5py>=3.10
+soundfile>=0.12
+faster-whisper>=1.1
+sounddevice>=0.4.6
