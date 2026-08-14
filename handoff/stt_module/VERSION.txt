@@ -1,0 +1,25 @@
+Module:
+Streaming Korean STT
+
+Version:
+0.1.0
+
+Status:
+Integration Ready
+
+Validated Environment:
+- macOS
+- Python 3.12.13
+- MacBook Air microphone
+- faster-whisper CPU inference
+
+Validation Result:
+- partial callback verified
+- final callback verified
+- callback overflow 0
+- max audio queue 1
+- unit tests 20 passed
+
+Target Environments:
+- Windows integration (static compatibility checked; actual execution pending)
+- Jetson Orin Nano (actual execution pending)
