@@ -72,7 +72,11 @@ class RuntimeState:
         self._frame: bytes | None = None
         self._frame_version = 0
         self._faces: list[dict[str, Any]] = []
-        self._active_speaker_id: int | None = None
+        # DOA와 얼굴 위치가 가리키는 화자 후보와 실제 STT 발화 중인 화자를
+        # 분리한다. 후보만으로 UI를 활성화하면 무음에도 화자가 강조된다.
+        self._matched_speaker_id: int | None = None
+        self._speaking_speaker_id: int | None = None
+        self._speaking_utterance_id: int | None = None
         self._direction = (1.0, 0.0, 0.0)
         self._captions: deque[Caption] = deque(maxlen=MAX_CAPTIONS)
         self._partial: dict[str, Any] | None = None
@@ -103,6 +107,8 @@ class RuntimeState:
             self._status[key] = not bool(self._status[key])
             if key == "recording" and not self._status[key]:
                 self._partial = None
+                self._speaking_speaker_id = None
+                self._speaking_utterance_id = None
             return bool(self._status[key])
 
     def is_recording(self) -> bool:
@@ -152,17 +158,17 @@ class RuntimeState:
         faces: list[dict[str, Any]],
         active_speaker_id: int | None,
     ) -> None:
-        """카메라 얼굴 상자와 현재 발화자를 갱신한다."""
+        """카메라 얼굴 상자와 DOA가 선택한 화자 후보를 갱신한다."""
 
         with self._lock:
             self._faces = faces
-            self._active_speaker_id = active_speaker_id
+            self._matched_speaker_id = active_speaker_id
 
     def active_speaker_id(self) -> int:
         """화자를 찾지 못한 경우에도 안전한 기본 화자 번호를 반환한다."""
 
         with self._lock:
-            return self._active_speaker_id or 1
+            return self._matched_speaker_id or 1
 
     def handle_stt_result(self, result: Any) -> None:
         """StreamingSTT 결과를 동일 발화의 화자와 묶어 UI 상태에 반영한다."""
@@ -172,15 +178,20 @@ class RuntimeState:
             utterance_id = int(getattr(result, "utterance_id", 0))
             speaker_id = self._utterance_speakers.setdefault(
                 utterance_id,
-                self._active_speaker_id or 1,
+                self._matched_speaker_id or 1,
             )
 
             if result_type == "partial":
+                text = str(getattr(result, "text", "")).strip()
                 self._partial = {
                     "speaker_id": speaker_id,
-                    "text": str(getattr(result, "text", "")),
+                    "text": text,
                     "latency_ms": float(getattr(result, "latency_ms", 0.0)),
                 }
+                # partial이 실제로 표시되는 동안만 화자 카드·얼굴 상자를
+                # 활성화한다. 같은 utterance의 final까지 화자 번호를 고정한다.
+                self._speaking_speaker_id = speaker_id if text else None
+                self._speaking_utterance_id = utterance_id if text else None
                 return
 
             if result_type == "final":
@@ -197,21 +208,29 @@ class RuntimeState:
                             ),
                         )
                     )
-                self._partial = None
+                if self._speaking_utterance_id == utterance_id:
+                    self._partial = None
+                    self._speaking_speaker_id = None
+                    self._speaking_utterance_id = None
                 self._utterance_speakers.pop(utterance_id, None)
                 return
 
             error = str(getattr(result, "error", "알 수 없는 STT 오류"))
             self._status["error"] = error
             if bool(getattr(result, "is_final", False)):
-                self._partial = None
+                if self._speaking_utterance_id == utterance_id:
+                    self._partial = None
+                    self._speaking_speaker_id = None
+                    self._speaking_utterance_id = None
                 self._utterance_speakers.pop(utterance_id, None)
 
     def add_demo_caption(self, speaker_id: int, text: str) -> None:
         """하드웨어 없는 화면 검증용 자막을 추가한다."""
 
         with self._lock:
-            self._active_speaker_id = speaker_id
+            self._matched_speaker_id = speaker_id
+            self._speaking_speaker_id = speaker_id
+            self._speaking_utterance_id = None
             self._captions.append(
                 Caption(
                     speaker_id=speaker_id,
@@ -230,10 +249,21 @@ class RuntimeState:
         """브라우저에 반환할 JSON 직렬화 가능 상태를 생성한다."""
 
         with self._lock:
+            faces = [
+                {
+                    **face,
+                    "active": (
+                        self._speaking_speaker_id is not None
+                        and int(face.get("speaker_id", 0))
+                        == self._speaking_speaker_id
+                    ),
+                }
+                for face in self._faces
+            ]
             return {
                 "speakers": list(SPEAKERS),
-                "faces": [dict(face) for face in self._faces],
-                "active_speaker_id": self._active_speaker_id,
+                "faces": faces,
+                "active_speaker_id": self._speaking_speaker_id,
                 "captions": [asdict(caption) for caption in self._captions],
                 "partial": dict(self._partial) if self._partial else None,
                 "status": dict(self._status),

@@ -6,6 +6,7 @@ import json
 import threading
 import unittest
 from http.client import HTTPConnection
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from stage6_caption_ui import (
@@ -75,6 +76,7 @@ class CaptionUITest(unittest.TestCase):
         self.assertIn('id="microphone-dot"', rendered)
         self.assertIn('id="camera-dot"', rendered)
         self.assertIn('id="runtime-dot"', rendered)
+        self.assertEqual(rendered.count('class="speaker-speaking-badge"'), 3)
         self.assertNotIn("mic-status-icon", rendered)
         self.assertNotIn("camera-status-icon", rendered)
 
@@ -87,8 +89,76 @@ class CaptionUITest(unittest.TestCase):
 
         _, _, script = self.request("GET", "/app.js")
         javascript = script.decode("utf-8")
+        self.assertIn("const POLL_INTERVAL_MS = 100;", javascript)
         self.assertIn('cameraDot.classList.toggle("live", connected)', javascript)
         self.assertIn('microphoneDot.classList.toggle("live", microphoneConnected)', javascript)
+        self.assertIn("현재 말하는 중", javascript)
+
+    def test_partial_activates_speaker_until_final(self) -> None:
+        """partial 화자는 강조하고 같은 발화의 final에서 해제한다."""
+
+        faces = [
+            {"speaker_id": 1, "active": False},
+            {"speaker_id": 2, "active": True},
+            {"speaker_id": 3, "active": False},
+        ]
+        self.state.update_faces(faces, active_speaker_id=2)
+        self.state.handle_stt_result(
+            SimpleNamespace(
+                type="partial",
+                text="안녕하세요",
+                latency_ms=120.0,
+                utterance_id=10,
+                is_final=False,
+                error=None,
+            )
+        )
+
+        partial_state = self.state.snapshot()
+        self.assertEqual(partial_state["active_speaker_id"], 2)
+        self.assertEqual(partial_state["partial"]["speaker_id"], 2)
+        self.assertEqual(
+            [face["speaker_id"] for face in partial_state["faces"] if face["active"]],
+            [2],
+        )
+
+        # DOA 후보가 바뀌어도 진행 중인 utterance는 최초 화자로 유지한다.
+        self.state.update_faces(faces, active_speaker_id=3)
+        self.assertEqual(self.state.snapshot()["active_speaker_id"], 2)
+
+        self.state.handle_stt_result(
+            SimpleNamespace(
+                type="final",
+                text="안녕하세요.",
+                latency_ms=310.0,
+                utterance_id=10,
+                is_final=True,
+                error=None,
+            )
+        )
+        final_state = self.state.snapshot()
+        self.assertIsNone(final_state["active_speaker_id"])
+        self.assertIsNone(final_state["partial"])
+        self.assertFalse(any(face["active"] for face in final_state["faces"]))
+        self.assertEqual(final_state["captions"][-1]["speaker_id"], 2)
+
+        # 다음 발화는 새 DOA 후보인 화자 3으로 구분한다.
+        self.state.handle_stt_result(
+            SimpleNamespace(
+                type="partial",
+                text="다음 발화입니다",
+                latency_ms=125.0,
+                utterance_id=11,
+                is_final=False,
+                error=None,
+            )
+        )
+        self.assertEqual(self.state.snapshot()["active_speaker_id"], 3)
+
+        self.state.toggle("recording")
+        stopped_state = self.state.snapshot()
+        self.assertIsNone(stopped_state["active_speaker_id"])
+        self.assertIsNone(stopped_state["partial"])
 
     def test_health_state_and_controls(self) -> None:
         status, _, payload = self.request("GET", "/health")
