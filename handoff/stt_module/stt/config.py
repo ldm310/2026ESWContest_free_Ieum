@@ -57,6 +57,18 @@ def get_compute_type() -> str:
 # 기본값은 small로 설정한다.
 MODEL_SIZE: str = "small"
 
+# 실시간 partial 자막은 정확한 final보다 응답 속도가 중요하다. 작은 tiny
+# 모델을 preview 전용으로 함께 로드하고, 확정 문장은 MODEL_SIZE의 small로
+# 다시 인식해 빠른 표시와 최종 정확도를 동시에 확보한다.
+PARTIAL_MODEL_SIZE: str = "tiny"
+
+# 프로젝트에서 반복되는 고유명사와 기술 용어를 Whisper 초기 문맥으로 준다.
+# 음성에 없는 문장을 강제로 생성하지 않도록 짧은 용어 목록만 사용한다.
+INITIAL_PROMPT: str = (
+    "임베디드 프로젝트, Jetson Orin Nano, ReSpeaker, 실시간 자막, "
+    "화자 인식, 방향 추정, 빔포밍, DOA, MVDR, BEM"
+)
+
 # 입력 음성을 한국어로 명시해 자동 언어 감지 비용을 줄인다.
 LANGUAGE: str = "ko"
 

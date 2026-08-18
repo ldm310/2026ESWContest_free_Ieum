@@ -18,17 +18,17 @@ from typing import Any, Callable, Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from stt.config import BEAM_SIZE, LANGUAGE, SAMPLE_RATE, VAD_FILTER
+from stt.config import BEAM_SIZE, INITIAL_PROMPT, LANGUAGE, SAMPLE_RATE
 from stt.model import ModelManager, get_model
 from stt.types import STTResult
 
 
 DEFAULT_SILENCE_THRESHOLD = 0.01
 DEFAULT_PARTIAL_INTERVAL_SECONDS = 0.5
-DEFAULT_SILENCE_DURATION_SECONDS = 0.7
+DEFAULT_SILENCE_DURATION_SECONDS = 0.45
 DEFAULT_PRE_ROLL_SECONDS = 0.3
 DEFAULT_MIN_SPEECH_DURATION_SECONDS = 0.3
-DEFAULT_PREVIEW_SECONDS = 8.0
+DEFAULT_PREVIEW_SECONDS = 6.0
 WARM_UP_AUDIO_SECONDS = 0.25
 
 PARTIAL_BEAM_SIZE = 1
@@ -36,6 +36,7 @@ PARTIAL_TEMPERATURE = 0.0
 PARTIAL_TASK = "transcribe"
 PARTIAL_CONDITION_ON_PREVIOUS_TEXT = False
 PARTIAL_VAD_FILTER = False
+STREAMING_FINAL_VAD_FILTER = False
 
 AudioArray = NDArray[np.float32]
 ResultCallback = Callable[[STTResult], None]
@@ -375,8 +376,16 @@ def _run_model_transcription(
     options: dict[str, Any] = {
         "language": LANGUAGE,
         "beam_size": beam_size,
-        "vad_filter": PARTIAL_VAD_FILTER if is_partial else VAD_FILTER,
+        # StreamingSTT가 RMS와 침묵 길이로 발화를 이미 잘라낸다. 여기서
+        # Silero VAD를 다시 적용하면 문장 앞뒤 음절이 잘리거나 final이
+        # 느려질 수 있으므로 partial/final 모두 중복 필터를 사용하지 않는다.
+        "vad_filter": (
+            PARTIAL_VAD_FILTER if is_partial else STREAMING_FINAL_VAD_FILTER
+        ),
+        "without_timestamps": True,
     }
+    if INITIAL_PROMPT:
+        options["initial_prompt"] = INITIAL_PROMPT
     if is_partial:
         options.update(
             task=PARTIAL_TASK,
@@ -441,12 +450,14 @@ class _InferenceScheduler:
 
     def __init__(
         self,
-        model: Any,
+        final_model: Any,
+        partial_model: Any,
         sample_rate: int,
         emitter: _ResultEmitter,
         stats: _Stats,
     ) -> None:
-        self._model = model
+        self._final_model = final_model
+        self._partial_model = partial_model
         self._sample_rate = sample_rate
         self._emitter = emitter
         self._stats = stats
@@ -557,7 +568,7 @@ class _InferenceScheduler:
         started_at = time.perf_counter()
         try:
             text = _transcribe_audio(
-                self._model,
+                self._partial_model,
                 request.audio,
                 self._sample_rate,
                 PARTIAL_BEAM_SIZE,
@@ -594,7 +605,7 @@ class _InferenceScheduler:
         started_at = time.perf_counter()
         try:
             text = _transcribe_audio(
-                self._model,
+                self._final_model,
                 request.audio,
                 self._sample_rate,
                 BEAM_SIZE,
@@ -814,20 +825,35 @@ class StreamingSTT:
             self._state = "starting"
 
         try:
+            # partial은 반응성이 높은 tiny, final은 정확도가 높은 기본 모델을
+            # 각각 한 번만 로드해 이후 모든 발화에서 재사용한다.
             model = get_model()
+            partial_model = ModelManager.get_partial_model()
             silent_audio = np.zeros(
                 round(self._sample_rate * WARM_UP_AUDIO_SECONDS), dtype=np.float32
             )
             _transcribe_audio(
-                model,
+                partial_model,
                 silent_audio,
                 self._sample_rate,
                 PARTIAL_BEAM_SIZE,
                 True,
             )
+            if partial_model is not model:
+                _transcribe_audio(
+                    model,
+                    silent_audio,
+                    self._sample_rate,
+                    BEAM_SIZE,
+                    False,
+                )
 
             scheduler = _InferenceScheduler(
-                model, self._sample_rate, self._emitter, self._stats
+                model,
+                partial_model,
+                self._sample_rate,
+                self._emitter,
+                self._stats,
             )
             processor = _AudioProcessor(
                 self._sample_rate,

@@ -54,7 +54,7 @@ stats = stt.get_stats()
 stt.stop()
 ```
 
-`start()`는 모델 로딩과 warm-up을 수행합니다. `push_*()`는 thread-safe하며 final 요청은 partial보다 우선합니다. `stop()`은 Queue와 worker를 정리하고 모델 참조를 해제합니다.
+`start()`는 빠른 partial용 `tiny`와 정확한 final용 `small` 모델을 한 번씩 로딩하고 warm-up합니다. `push_*()`는 thread-safe하며 final 요청은 partial보다 우선합니다. `stop()`은 Queue와 worker를 정리하고 두 모델 참조를 해제합니다.
 
 ## 6. 입력 계약
 
@@ -125,7 +125,7 @@ PowerShell 가상환경, 실행 정책, 설치, import, 테스트와 WAV 예제 
 python -m unittest discover -s tests -v
 ```
 
-20개 테스트는 실제 Whisper 모델과 마이크 없이 입력 변환, lifecycle, callback, flush, 통계와 단일 추론을 검증합니다.
+21개 테스트는 실제 Whisper 모델과 마이크 없이 입력 변환, lifecycle, callback, flush, 통계, 단일 추론과 partial/final 모델 분리를 검증합니다.
 
 ## 15. 실행 가능한 WAV 예제
 

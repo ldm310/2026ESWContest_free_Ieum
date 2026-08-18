@@ -30,13 +30,23 @@ class StreamingSTTTest(unittest.TestCase):
     """StreamingSTT 입력 계약, lifecycle, callback과 통계를 검증한다."""
 
     def setUp(self) -> None:
-        self.model_patcher = patch("stt.streaming.get_model", return_value=object())
+        self.final_model = object()
+        self.partial_model = object()
+        self.model_patcher = patch(
+            "stt.streaming.get_model", return_value=self.final_model
+        )
+        self.partial_model_patcher = patch(
+            "stt.streaming.ModelManager.get_partial_model",
+            return_value=self.partial_model,
+        )
         self.unload_patcher = patch("stt.streaming.ModelManager.unload_model")
         self.model_patcher.start()
+        self.partial_model_patcher.start()
         self.mock_unload = self.unload_patcher.start()
 
     def tearDown(self) -> None:
         self.unload_patcher.stop()
+        self.partial_model_patcher.stop()
         self.model_patcher.stop()
 
     def make_stream(
@@ -179,6 +189,31 @@ class StreamingSTTTest(unittest.TestCase):
         self.assertTrue(
             all(datetime.fromisoformat(result.timestamp).tzinfo is not None for result in results)
         )
+        stream.stop()
+
+    def test_partial_and_final_use_separate_models(self) -> None:
+        transcribe = Mock(
+            side_effect=lambda model, audio, rate, beam, partial: (
+                "부분 자막" if partial else "최종 자막"
+            )
+        )
+        results: list[STTResult] = []
+        stream, _ = self.make_stream(results.append, transcribe)
+        transcribe.reset_mock()  # start()의 두 모델 warm-up 호출은 제외한다.
+
+        voice = np.full(30, 0.2, dtype=np.float32)
+        stream.push_audio(voice, sample_rate=1_000)
+        stream.push_audio(voice, sample_rate=1_000)
+        wait_until(lambda: any(result.type == "partial" for result in results))
+        stream.flush()
+
+        runtime_calls = transcribe.call_args_list
+        partial_calls = [call for call in runtime_calls if call.args[4] is True]
+        final_calls = [call for call in runtime_calls if call.args[4] is False]
+        self.assertTrue(partial_calls)
+        self.assertTrue(final_calls)
+        self.assertTrue(all(call.args[0] is self.partial_model for call in partial_calls))
+        self.assertTrue(all(call.args[0] is self.final_model for call in final_calls))
         stream.stop()
 
     def test_silence_creates_final(self) -> None:

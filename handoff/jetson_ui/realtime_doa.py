@@ -38,6 +38,7 @@ MVDR_MIN_HZ = 1_250.0
 GRID_STEP_DEG = 5.0
 DIAGONAL_LOADING = 1e-2
 CHUNK_SEC = 0.5
+MAX_PENDING_CHUNKS = 2
 
 DEVICE_NAME = "ReSpeaker"
 CHANNELS = 6
@@ -117,10 +118,15 @@ def resolve_input_device(sd, requested: str) -> int:
 
 
 class AudioChunkCollector:
-    """sounddevice callback의 입력을 손실 없이 0.5초 단위로 묶는다."""
+    """sounddevice 입력을 최신 0.5초 chunk 중심으로 유지한다."""
 
     def __init__(self) -> None:
-        self.queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=8)
+        # 처리 속도가 입력보다 느려져도 오래된 음성이 최대 4초씩 쌓이지 않게
+        # 1초 분량만 대기시킨다. 실시간 자막에서는 과거 입력 보존보다 현재
+        # 화자의 음성을 빠르게 전달하는 것이 중요하다.
+        self.queue: queue.Queue[np.ndarray] = queue.Queue(
+            maxsize=MAX_PENDING_CHUNKS
+        )
         self._pending = np.empty((0, len(DOA_CHANNELS)), dtype=np.float32)
         self._frames_per_chunk = int(SAMPLE_RATE * CHUNK_SEC)
 
@@ -140,7 +146,18 @@ class AudioChunkCollector:
             try:
                 self.queue.put_nowait(chunk)
             except queue.Full:
-                print("[오디오 경고] 처리 큐가 가득 차 오래된 chunk를 건너뜁니다.", flush=True)
+                # 가득 찬 경우 새 chunk를 버리면 화면이 계속 과거 발화를
+                # 따라가게 된다. 가장 오래된 하나를 제거하고 최신 입력을 넣는다.
+                try:
+                    self.queue.get_nowait()
+                except queue.Empty:
+                    pass
+                self.queue.put_nowait(chunk)
+                print(
+                    "[오디오 경고] 처리 지연으로 가장 오래된 chunk를 버리고 "
+                    "최신 입력을 유지합니다.",
+                    flush=True,
+                )
 
 
 def send_mono_audio(

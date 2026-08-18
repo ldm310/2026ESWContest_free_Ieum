@@ -1,6 +1,7 @@
 "use strict";
 
-const POLL_INTERVAL_MS = 300;
+// partial 결과가 생성된 뒤 화면 표시까지 생기는 추가 지연을 0.1초 이내로 제한한다.
+const POLL_INTERVAL_MS = 100;
 const SPEAKER_COLORS = { 1: "#2878f0", 2: "#20b45a", 3: "#ff9818" };
 const WAVE_HEIGHTS = [7, 12, 9, 18, 13, 22, 16, 10, 19, 14, 8, 12, 7, 10, 16, 12, 8, 11, 7, 9];
 
@@ -97,6 +98,10 @@ function renderSpeakerCards(state) {
     const speakerId = Number(card.dataset.speakerId);
     const active = state.status.recording && speakerId === Number(state.active_speaker_id);
     card.classList.toggle("active", active);
+    card.setAttribute(
+      "aria-label",
+      active ? `${speakerName(state.speakers, speakerId)}, 현재 말하는 중` : speakerName(state.speakers, speakerId),
+    );
   });
 }
 

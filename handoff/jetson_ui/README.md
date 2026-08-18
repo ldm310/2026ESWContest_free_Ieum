@@ -52,7 +52,10 @@ chmod +x run_jetson_ui.sh
 - 미연결 마이크·카메라 빨간 원 표시 확인
 - 연결 시 초록 원으로 전환하는 코드 검사
 - 브라우저 JavaScript 오류 0건
-- Python 자동 테스트 3개 통과
+- Python 자동 테스트 4개 통과
+- partial 동안 해당 화자 카드·얼굴 상자만 활성화
+- final 또는 녹음 중지 시 활성 화자 표시 해제
+- 진행 중인 발화는 DOA 후보가 바뀌어도 최초 화자 번호 유지
 - Ctrl+C 종료 시 traceback 없이 정상 종료
 
 실제 카메라·ReSpeaker·HDMI 출력은 Jetson 장치에서 마지막으로 확인해야 한다.
