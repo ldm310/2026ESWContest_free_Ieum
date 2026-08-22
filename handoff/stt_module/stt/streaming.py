@@ -18,17 +18,17 @@ from typing import Any, Callable, Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from stt.config import BEAM_SIZE, INITIAL_PROMPT, LANGUAGE, SAMPLE_RATE
+from stt.config import BEAM_SIZE, HOTWORDS, INITIAL_PROMPT, LANGUAGE, SAMPLE_RATE
 from stt.model import ModelManager, get_model
 from stt.types import STTResult
 
 
 DEFAULT_SILENCE_THRESHOLD = 0.01
-DEFAULT_PARTIAL_INTERVAL_SECONDS = 0.5
+DEFAULT_PARTIAL_INTERVAL_SECONDS = 0.25
 DEFAULT_SILENCE_DURATION_SECONDS = 0.45
 DEFAULT_PRE_ROLL_SECONDS = 0.3
 DEFAULT_MIN_SPEECH_DURATION_SECONDS = 0.3
-DEFAULT_PREVIEW_SECONDS = 6.0
+DEFAULT_PREVIEW_SECONDS = 4.0
 WARM_UP_AUDIO_SECONDS = 0.25
 
 PARTIAL_BEAM_SIZE = 1
@@ -386,6 +386,8 @@ def _run_model_transcription(
     }
     if INITIAL_PROMPT:
         options["initial_prompt"] = INITIAL_PROMPT
+    if HOTWORDS:
+        options["hotwords"] = HOTWORDS
     if is_partial:
         options.update(
             task=PARTIAL_TASK,
@@ -932,7 +934,12 @@ class StreamingSTT:
         self.push_audio(mono, sample_rate)
 
     def flush(self) -> None:
-        """Queue 선행 음성을 모두 반영하고 현재 발화를 final로 확정한다."""
+        """외부 문장 종료 신호를 받아 현재 발화를 즉시 final로 확정한다.
+
+        Queue에 먼저 들어온 음성을 모두 반영한 뒤 final callback이 끝날 때까지
+        기다린다. DOA·Beamforming 모듈이 문장 종료를 검출하면 침묵 timeout을
+        기다리지 않고 이 메서드를 호출하는 것이 권장된다.
+        """
 
         completed = threading.Event()
         with self._state_condition:

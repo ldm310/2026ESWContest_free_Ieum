@@ -7,11 +7,20 @@ import time
 import unittest
 from dataclasses import FrozenInstanceError
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
 
-from stt.streaming import StreamingSTT, prepare_audio_array, resample_linear
+from stt import config
+from stt.streaming import (
+    DEFAULT_PARTIAL_INTERVAL_SECONDS,
+    DEFAULT_PREVIEW_SECONDS,
+    StreamingSTT,
+    _run_model_transcription,
+    prepare_audio_array,
+    resample_linear,
+)
 from stt.types import STTResult
 
 
@@ -84,6 +93,38 @@ class StreamingSTTTest(unittest.TestCase):
         stream.stop()
         stream.stop()
         self.mock_unload.assert_called_once()
+
+    def test_realtime_default_settings_match_jetson_profile(self) -> None:
+        """Jetson 추천 연산·Partial·Final 기본값의 회귀를 방지한다."""
+
+        self.assertEqual(DEFAULT_PARTIAL_INTERVAL_SECONDS, 0.25)
+        self.assertEqual(DEFAULT_PREVIEW_SECONDS, 4.0)
+        self.assertEqual(config.BEAM_SIZE, 3)
+        with patch("stt.config.get_device", return_value="cuda"):
+            self.assertEqual(config.get_compute_type(), "int8_float16")
+        with patch("stt.config.get_device", return_value="cpu"):
+            self.assertEqual(config.get_compute_type(), "int8")
+
+    def test_transcription_uses_prompt_and_hotwords(self) -> None:
+        """Partial과 Final 모두 프로젝트 전문용어 문맥을 전달한다."""
+
+        model = Mock()
+        model.transcribe.return_value = (
+            iter([SimpleNamespace(text=" 전문용어 자막 ")]),
+            object(),
+        )
+        text = _run_model_transcription(
+            model,
+            np.ones(1_600, dtype=np.float32),
+            beam_size=config.BEAM_SIZE,
+            is_partial=False,
+        )
+
+        self.assertEqual(text, "전문용어 자막")
+        options = model.transcribe.call_args.kwargs
+        self.assertEqual(options["initial_prompt"], config.INITIAL_PROMPT)
+        self.assertEqual(options["hotwords"], config.HOTWORDS)
+        self.assertEqual(options["beam_size"], 3)
 
     def test_push_before_start_raises(self) -> None:
         stream = StreamingSTT(lambda result: None)

@@ -41,7 +41,9 @@ python -c "from stt.config import get_device, get_compute_type; print(get_device
 python -c "import ctranslate2; print(ctranslate2.__version__)"
 ```
 
-CPU에서는 기본 `int8`, CUDA에서는 기본 `float16`입니다. 설치된 CTranslate2와 장치가 해당 형식을 지원하는지 확인하십시오. 오류 전문을 보존한 뒤 환경 호환성을 먼저 점검합니다.
+CPU에서는 기본 `int8`, CUDA에서는 기본 `int8_float16`입니다. 설치된
+CTranslate2와 장치가 해당 형식을 지원하는지 확인하십시오. 오류 전문을
+보존한 뒤 환경 호환성을 먼저 점검합니다.
 
 ## 6. 입력 배열 shape 오류
 

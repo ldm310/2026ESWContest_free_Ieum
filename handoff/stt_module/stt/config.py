@@ -41,14 +41,15 @@ def get_device() -> str:
 def get_compute_type() -> str:
     """현재 장치에 적합한 faster-whisper 연산 형식을 반환한다.
 
-    CUDA에서는 빠른 반정밀도 연산인 ``float16``을 사용하고, CPU에서는
-    메모리 사용량과 처리 효율을 고려한 ``int8`` 양자화를 사용한다.
+    CUDA에서는 모델 가중치를 INT8로 줄이고 나머지 연산을 FP16으로 수행하는
+    ``int8_float16``을 사용한다. CPU에서는 메모리 사용량과 처리 효율을
+    고려한 ``int8`` 양자화를 사용한다.
 
     Returns:
-        CUDA 환경이면 ``"float16"``, CPU 환경이면 ``"int8"``.
+        CUDA 환경이면 ``"int8_float16"``, CPU 환경이면 ``"int8"``.
     """
 
-    return "float16" if get_device() == "cuda" else "int8"
+    return "int8_float16" if get_device() == "cuda" else "int8"
 
 
 # 사용할 Whisper 모델의 크기 또는 버전 이름이다. ``tiny``, ``base``,
@@ -69,11 +70,20 @@ INITIAL_PROMPT: str = (
     "화자 인식, 방향 추정, 빔포밍, DOA, MVDR, BEM"
 )
 
+# faster-whisper decoder가 프로젝트 전문용어를 후보로 우선 고려하도록 하는
+# 짧은 Hotword 목록이다. Initial Prompt와 함께 사용하되, 실제 음성에 없는
+# 문장을 생성하지 않도록 설명 문장이 아닌 핵심 용어만 쉼표로 구분한다.
+HOTWORDS: str = (
+    "Jetson Orin Nano, ReSpeaker, STT, DOA, MVDR, BEM, CUDA, CTranslate2, "
+    "faster-whisper, Beamforming, GPU, RTF, Partial, Final"
+)
+
 # 입력 음성을 한국어로 명시해 자동 언어 감지 비용을 줄인다.
 LANGUAGE: str = "ko"
 
-# 디코딩 시 유지할 후보 수. 값이 클수록 탐색은 넓어지지만 처리 시간이 늘어난다.
-BEAM_SIZE: int = 5
+# Final 디코딩 시 유지할 후보 수. beam 3은 기존 beam 5보다 탐색량을 줄이면서
+# beam 1보다 정확도를 보존하기 위한 Jetson 실시간 처리 절충값이다.
+BEAM_SIZE: int = 3
 
 # 무음 구간을 제외해 불필요한 추론을 줄이기 위한 VAD 필터 사용 여부이다.
 VAD_FILTER: bool = True

@@ -1,0 +1,16 @@
+[
+  {"canonical": "제트슨 오린 나노", "variants": ["Jetson Orin Nano", "젯슨 오린 나노", "제트슨 오린 나노"]},
+  {"canonical": "리스피커", "variants": ["ReSpeaker", "리스피커", "리 스피커"]},
+  {"canonical": "에스티티", "variants": ["STT", "에스티티"]},
+  {"canonical": "디오에이", "variants": ["DOA", "디오에이"]},
+  {"canonical": "엠브이디알", "variants": ["MVDR", "엠브이디알"]},
+  {"canonical": "비이엠", "variants": ["BEM", "비이엠"]},
+  {"canonical": "쿠다", "variants": ["CUDA", "쿠다", "씨유디에이"]},
+  {"canonical": "씨트랜슬레이트투", "variants": ["CTranslate2", "씨트랜슬레이트투"]},
+  {"canonical": "패스터 위스퍼", "variants": ["faster-whisper", "faster whisper", "패스터 위스퍼"]},
+  {"canonical": "빔포밍", "variants": ["Beamforming", "빔포밍", "빔 포밍"]},
+  {"canonical": "지피유", "variants": ["GPU", "지피유"]},
+  {"canonical": "알티에프", "variants": ["RTF", "알티에프"]},
+  {"canonical": "파셜", "variants": ["Partial", "파셜", "중간 자막"]},
+  {"canonical": "파이널", "variants": ["Final", "파이널", "최종 자막"]}
+]

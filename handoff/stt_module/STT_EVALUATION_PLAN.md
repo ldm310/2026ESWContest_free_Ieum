@@ -1,6 +1,9 @@
 # 한국어 Streaming STT 성능 평가 및 개선 계획
 
-이 문서는 경진대회 최종 보고서에 사용할 STT 평가 기준, 전문 어휘 표기, 현재 모델 특징과 최종 성능 지표를 정리한다. 아직 측정하지 않은 값은 `TBD`로 표시한다.
+이 문서는 경진대회 최종 보고서에 사용할 STT 평가 기준, 전문 어휘 표기,
+현재 모델 특징과 최종 성능 지표를 정리한다. 2026-08-22 Mac 합성 음성
+30문장 결과를 로컬 기준선으로 기록하며, 실제 Windows·Jetson·ReSpeaker에서
+측정하지 않은 값은 `TBD`로 표시한다.
 
 ## 1. 평가지표
 
@@ -73,7 +76,7 @@ KoSpeech 논문은 KsponSpeech에서 LAS 기반 음향 모델의 CER 10.31%를 �
 4. Initial Prompt 또는 Hotword를 적용해 같은 음성으로 다시 측정한다.
 5. 반복적으로 발생하고 의미가 명확한 오류만 제한적으로 후처리한다.
 
-현재 설치된 faster-whisper 1.2.1은 `initial_prompt`와 `hotwords` 인자를 지원하지만, 현재 STT 코드에는 적용되어 있지 않다. Prompt 예시는 다음과 같다.
+현재 STT 코드는 프로젝트 전문용어 목록을 `initial_prompt`에 적용한다.
 
 ```text
 이 음성은 Jetson Orin Nano, DOA, MVDR Beamforming, CUDA에 관한 발표입니다.
@@ -87,30 +90,47 @@ Prompt는 전문 용어 인식 가능성을 높일 수 있지만 정확한 출�
 
 | 항목 | 현재 설정 | 특징 |
 |---|---|---|
-| 모델 | faster-whisper `small` | 속도와 정확도의 균형을 고려한 다국어 모델 |
+| 모델 | Partial `tiny`, Final `small` | 중간 자막 반응성과 최종 정확도를 분리 |
 | 언어 | `ko` | 한국어로 고정 |
 | 입력 | mono, 16,000 Hz, NumPy/PCM16 | Beamforming 결과를 직접 연결할 수 있음 |
-| 실행 장치 | CUDA 감지 시 GPU, 아니면 CPU | GPU `float16`, CPU `int8` 자동 선택 |
-| Partial | 0.5초 간격, 최근 8초, beam 1 | 빠른 갱신 우선 |
-| Final | 전체 발화, beam 5, VAD 사용 | Partial보다 정확도 우선 |
-| 발화 종료 | RMS 임계값 0.01, 침묵 0.7초 | 단순하고 빠르지만 주변 소음에 민감할 수 있음 |
+| 실행 장치 | CUDA 감지 시 GPU, 아니면 CPU | GPU `int8_float16`, CPU `int8` 자동 선택 |
+| Partial | 0.25초 간격, 최근 4초, beam 1 | `tiny` 모델로 빠른 갱신 우선 |
+| Final | 전체 발화, beam 3, 중복 VAD 미사용 | `small` 모델로 속도·정확도 절충 |
+| 발화 종료 | RMS 임계값 0.01, 침묵 0.45초 | 주변 소음에 따라 조정 필요 |
 | 모델 관리 | Singleton/Lazy Loading | 모델을 한 번 로드해 재사용 |
 | 처리 구조 | 최신 Partial 유지, Final 우선, 추론 직렬화 | Queue 적체와 중복 추론을 줄임 |
 
 현재 방식은 토큰 단위의 진정한 Streaming이 아니라, 최근 음성을 반복 추론하는 **Rolling Buffer 방식**이다. 따라서 Partial은 바뀔 수 있으며 Final에서 전체 발화를 다시 인식한다. 긴 발화는 Final까지 메모리에 유지되고, Jetson GPU 성능과 전문 용어 정확도는 아직 실제 측정 전이다.
 
-기존 Mac CPU 검증값은 다음과 같다.
+Mac CPU에서 macOS 한국어 TTS로 생성한 30문장 기준선은 다음과 같다.
+합성 음성 결과는 모델·설정 비교용이며 실제 사용 환경의 최종 성능이 아니다.
 
 | 항목 | 측정값 |
 |---|---:|
-| 평균 Partial Latency | 약 1,054.18 ms |
-| 최대 Partial Latency | 약 1,129.68 ms |
-| 평균 Final Latency | 약 1,748.29 ms |
-| 최대 Audio Queue | 1 |
-| Callback overflow | 0 |
-| 자동 테스트 | 20개 통과 |
+| 평가 문장/음성 길이 | 30개 / 103.775초 |
+| 원시 CER / WER | 11.26% / 18.14% |
+| 전문용어 정규화 CER | 7.84% |
+| 전문용어 정확도 | 95.45% |
+| 문장 완전 일치율 | 46.67% |
+| 평균 / P95 Final Latency | 1,544.07 ms / 1,848.10 ms |
+| RTF | 0.4464 |
+| 빈 결과 / 오류 / 중복 | 0 / 0 / 0 |
+| 자동 테스트 | 29개 통과 |
 
-이 값은 실행 및 안정성 검증 결과이며 STT 정확도 결과는 아니다.
+동일 프로세스에서 실행 순서를 번갈아 측정한 설정 A/B 결과는 다음과 같다.
+모델 로딩과 공통 warm-up은 비교 지연시간에서 제외했다.
+
+| 설정 | 원시 CER | 정규화 CER | 전문용어 정확도 | 평균 Latency | RTF |
+|---|---:|---:|---:|---:|---:|
+| 이전: small, beam 5, prompt | 13.16% | 9.29% | 72.73% | 1,489.85 ms | 0.4307 |
+| 현재: small, beam 3, prompt+hotwords | 11.26% | 7.84% | 95.45% | 1,462.90 ms | 0.4229 |
+| 참고: medium, beam 5, prompt | 17.10% | 9.29% | 77.27% | 4,066.47 ms | 1.1756 |
+
+현재 설정은 이전 설정보다 원시 CER이 1.90%p, 정규화 CER이 1.45%p
+낮아졌고 전문용어 정확도는 22.72%p 높아졌다. 같은 프로세스의 평균
+추론시간은 26.95ms(1.81%) 감소했다. 독립 재실행에서는 평균 1,544.07ms로
+측정되어 Mac CPU Final 500ms 목표에는 미달했다. 실제 사람·마이크·Jetson
+성능이 아니라 로컬 합성 음성 기준선이다.
 
 ## 4. STT 성능 최종 지표
 
@@ -127,8 +147,12 @@ Prompt는 전문 용어 인식 가능성을 높일 수 있지만 정확한 출�
 
 | 환경 | 데이터 | CER | WER | 전문 용어 정확도 | Final Latency | RTF | 실패율 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Mac CPU | 일반 한국어 | TBD | TBD | N/A | TBD | TBD | TBD |
-| Mac CPU | 전문 분야 | TBD | TBD | TBD | TBD | TBD | TBD |
+| Mac CPU | 합성 전체 30문장 | 11.26% | 18.14% | 95.45% | 1,544.07 ms | 0.4464 | 0% |
+| Mac CPU | 합성 일반 10문장 | 0.53% | 5.08% | N/A | 전체 평균 참고 | 전체 평균 참고 | 0% |
+| Mac CPU | 합성 전문 10문장 | 13.40% | 15.49% | 93.33% | 전체 평균 참고 | 전체 평균 참고 | 0% |
+| Mac CPU | 합성 혼합 10문장 | 16.80% | 31.08% | 100.00% | 전체 평균 참고 | 전체 평균 참고 | 0% |
+| Mac CPU | 합성 전체 30문장, medium(이전 설정) | 17.10% | 17.16% | 77.27% | 4,066.47 ms | 1.1756 | 0% |
+| Windows CPU/GPU | Windows TTS 30문장 | TBD | TBD | TBD | TBD | TBD | TBD |
 | Jetson GPU | 일반 한국어 | TBD | TBD | N/A | TBD | TBD | TBD |
 | Jetson GPU | 전문 분야 | TBD | TBD | TBD | TBD | TBD | TBD |
 

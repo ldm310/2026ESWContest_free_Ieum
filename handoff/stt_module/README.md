@@ -19,6 +19,7 @@ DOA·Beamforming 이후 mono 음성을 받아 faster-whisper 기반 한국어 pa
 stt_module/
 ├── stt/                # 핵심 API와 모델 설정
 ├── examples/           # NumPy, WAV, PCM16 연결 예제
+├── evaluation/         # Windows/macOS TTS 30문장 생성 및 CER/WER 평가
 ├── tests/              # 실제 모델 없는 자동 테스트
 ├── sample_data/        # 사용자 WAV 배치 위치 안내
 ├── requirements-core.txt
@@ -39,6 +40,9 @@ python -c "from stt import StreamingSTT, STTResult; print('import 성공')"
 ```
 
 Windows PowerShell 명령은 [WINDOWS_SETUP.md](WINDOWS_SETUP.md)를 참고하십시오.
+
+Windows에서 GitHub 코드를 받는 방법, 한국어 TTS 30문장 생성, small·medium
+평가 및 Jetson 전달 명령도 같은 문서에 정리되어 있습니다.
 
 ## 5. 핵심 API
 
@@ -125,7 +129,8 @@ PowerShell 가상환경, 실행 정책, 설치, import, 테스트와 WAV 예제 
 python -m unittest discover -s tests -v
 ```
 
-21개 테스트는 실제 Whisper 모델과 마이크 없이 입력 변환, lifecycle, callback, flush, 통계, 단일 추론과 partial/final 모델 분리를 검증합니다.
+29개 테스트는 실제 Whisper 모델과 마이크 없이 입력 변환, lifecycle, callback,
+flush, 통계, partial/final 모델 분리와 평가 데이터·지표 계산을 검증합니다.
 
 ## 15. 실행 가능한 WAV 예제
 
