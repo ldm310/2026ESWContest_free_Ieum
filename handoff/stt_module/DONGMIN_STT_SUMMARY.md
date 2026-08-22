@@ -148,6 +148,6 @@ stt.stop()
 
 - `README.md`: 설치 및 전체 사용법
 - `INTERFACE_CONTRACT.md`: 정확한 입력·출력 규격
-- `WINDOWS_SETUP.md`: Windows 설치 방법
+- `JETSON_UBUNTU_SSH_SETUP.md`: SSH 접속 후 Jetson Ubuntu에서 GitHub 코드를 직접 받는 방법
 - `TROUBLESHOOTING.md`: 오류 해결 방법
 - `STT_EVALUATION_PLAN.md`: 성능 평가 기준
