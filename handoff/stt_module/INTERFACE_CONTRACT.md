@@ -67,7 +67,10 @@ STTResult(
 1. `StreamingSTT(on_result=...)` 생성
 2. `start()`로 모델 로딩, warm-up, worker 시작
 3. `push_audio()` 또는 `push_pcm16()`을 시간 순서대로 호출
-4. 입력 전환·화자 전환·종료 시 필요하면 `flush()` 호출
+4. DOA·Beamforming 모듈의 문장 종료 신호, 입력 전환 또는 화자 전환 시
+   즉시 `flush()` 호출
 5. 반드시 `stop()` 호출
 
-`start()`와 `stop()`의 중복 호출은 안전합니다. start 전 또는 stop 후 입력은 `RuntimeError`입니다. `flush()`는 현재 발화의 final callback 완료까지 기다립니다.
+`start()`와 `stop()`의 중복 호출은 안전합니다. start 전 또는 stop 후 입력은
+`RuntimeError`입니다. `flush()`는 침묵 timeout을 기다리지 않고 현재 발화를
+확정하며, final callback 완료까지 기다립니다.

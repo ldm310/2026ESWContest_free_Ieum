@@ -36,6 +36,8 @@ models/
 # Runtime outputs
 output/
 *.log
+handoff/stt_module/evaluation/generated/
+handoff/stt_module/evaluation/results/
 
 # Audio data
 *.wav
