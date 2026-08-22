@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import sys
 import tempfile
 import threading
@@ -29,6 +30,8 @@ DEFAULT_SILENCE_DURATION_SECONDS = 0.45
 DEFAULT_PRE_ROLL_SECONDS = 0.3
 DEFAULT_MIN_SPEECH_DURATION_SECONDS = 0.3
 DEFAULT_PREVIEW_SECONDS = 4.0
+DEFAULT_NOISE_CALIBRATION_SECONDS = 1.0
+DEFAULT_NOISE_THRESHOLD_MULTIPLIER = 2.5
 WARM_UP_AUDIO_SECONDS = 0.25
 
 PARTIAL_BEAM_SIZE = 1
@@ -36,7 +39,18 @@ PARTIAL_TEMPERATURE = 0.0
 PARTIAL_TASK = "transcribe"
 PARTIAL_CONDITION_ON_PREVIOUS_TEXT = False
 PARTIAL_VAD_FILTER = False
-STREAMING_FINAL_VAD_FILTER = False
+FINAL_CONDITION_ON_PREVIOUS_TEXT = False
+STREAMING_FINAL_VAD_FILTER = True
+STREAMING_FINAL_VAD_PARAMETERS = {
+    "threshold": 0.5,
+    "min_speech_duration_ms": 250,
+    "min_silence_duration_ms": 200,
+    "speech_pad_ms": 200,
+}
+MIN_FINAL_AVG_LOGPROB = -1.2
+MAX_FINAL_NO_SPEECH_PROB = 0.8
+NOISE_FLOOR_SMOOTHING = 0.1
+AUDIO_CONDITIONING_MIN_SAMPLES = 32
 
 AudioArray = NDArray[np.float32]
 ResultCallback = Callable[[STTResult], None]
@@ -72,7 +86,7 @@ def longest_common_prefix(previous: str, current: str) -> str:
 
 
 def merge_partial(stable_prefix: str, current_text: str) -> str:
-    """안정 prefix와 최신 partial 후보를 중복 없이 합친다."""
+    """호환되는 안정 prefix만 유지하고 충돌 시 최신 partial을 반환한다."""
 
     stable_prefix = normalize_text(stable_prefix)
     current_text = normalize_text(current_text)
@@ -82,8 +96,10 @@ def merge_partial(stable_prefix: str, current_text: str) -> str:
         return current_text
     if stable_prefix.startswith(current_text):
         return stable_prefix
-    overlap = longest_common_prefix(stable_prefix, current_text)
-    return normalize_text(stable_prefix + current_text[len(overlap) :])
+    # 서로 다른 tiny 모델 가설을 문자열로 이어 붙이면 같은 문구가 반복되거나
+    # 존재하지 않는 문장이 만들어진다. UI는 partial을 교체 표시하므로 충돌한
+    # 경우에는 오래된 prefix를 버리고 최신 가설만 전달한다.
+    return current_text
 
 
 def resample_linear(
@@ -154,7 +170,19 @@ def prepare_audio_array(
 
     if not np.all(np.isfinite(prepared)):
         raise ValueError("오디오에 NaN 또는 Inf가 포함되어 있습니다.")
-    return resample_linear(prepared, source_rate, target_rate)
+
+    prepared = resample_linear(prepared, source_rate, target_rate)
+
+    # Beamforming 출력에는 작은 DC offset 또는 -1~1 범위를 벗어나는 peak가
+    # 포함될 수 있다. 긴 실제 chunk에 한해 평균값을 제거하고, 큰 peak는
+    # 잘라 왜곡시키지 않고 전체 chunk를 같은 비율로 축소한다. 작은 단위 테스트
+    # 배열과 빈 입력의 의미는 그대로 유지한다.
+    if prepared.size >= AUDIO_CONDITIONING_MIN_SAMPLES:
+        prepared = prepared - np.mean(prepared, dtype=np.float64)
+    peak = float(np.max(np.abs(prepared)))
+    if peak > 1.0:
+        prepared = prepared / peak
+    return np.clip(prepared, -1.0, 1.0).astype(np.float32, copy=False)
 
 
 class _StablePartialTracker:
@@ -365,6 +393,58 @@ def _normalize_segments(segments: Any) -> str:
     return normalize_text("".join(segment.text for segment in segments))
 
 
+def _segment_is_confident(segment: Any) -> bool:
+    """Final segment가 보수적인 신뢰도 기준을 만족하는지 확인한다."""
+
+    avg_logprob_value = getattr(segment, "avg_logprob", 0.0)
+    no_speech_value = getattr(segment, "no_speech_prob", 0.0)
+    avg_logprob = 0.0 if avg_logprob_value is None else float(avg_logprob_value)
+    no_speech_prob = 0.0 if no_speech_value is None else float(no_speech_value)
+    return (
+        avg_logprob >= MIN_FINAL_AVG_LOGPROB
+        and no_speech_prob <= MAX_FINAL_NO_SPEECH_PROB
+    )
+
+
+def _looks_like_prompt_hallucination(text: str) -> bool:
+    """한국어 없이 전문용어만 나열·반복한 결과를 환각으로 판별한다."""
+
+    normalized = normalize_text(text)
+    if not normalized or re.search(r"[가-힣]", normalized):
+        return False
+
+    total_alnum = sum(character.isalnum() for character in normalized)
+    if total_alnum == 0:
+        return True
+
+    remaining = normalized.casefold()
+    matched_hotword = False
+    hotwords = sorted(
+        (word.strip() for word in HOTWORDS.split(",") if word.strip()),
+        key=len,
+        reverse=True,
+    )
+    for hotword in hotwords:
+        updated, replacements = re.subn(
+            re.escape(hotword.casefold()),
+            " ",
+            remaining,
+        )
+        if replacements:
+            matched_hotword = True
+            remaining = updated
+
+    remaining_alnum = sum(character.isalnum() for character in remaining)
+    hotword_ratio = 1.0 - (remaining_alnum / total_alnum)
+    tokens = re.findall(r"[A-Za-z0-9]+", normalized.casefold())
+    repeated_ratio = (
+        max(tokens.count(token) for token in set(tokens)) / len(tokens)
+        if tokens
+        else 0.0
+    )
+    return matched_hotword and (hotword_ratio >= 0.5 or repeated_ratio >= 0.5)
+
+
 def _run_model_transcription(
     model: Any,
     audio_input: AudioArray | str,
@@ -373,29 +453,39 @@ def _run_model_transcription(
 ) -> str:
     """partial/final 설정으로 모델을 호출하고 지연 segment를 소비한다."""
 
+    vad_filter = PARTIAL_VAD_FILTER if is_partial else STREAMING_FINAL_VAD_FILTER
     options: dict[str, Any] = {
         "language": LANGUAGE,
         "beam_size": beam_size,
-        # StreamingSTT가 RMS와 침묵 길이로 발화를 이미 잘라낸다. 여기서
-        # Silero VAD를 다시 적용하면 문장 앞뒤 음절이 잘리거나 final이
-        # 느려질 수 있으므로 partial/final 모두 중복 필터를 사용하지 않는다.
-        "vad_filter": (
-            PARTIAL_VAD_FILTER if is_partial else STREAMING_FINAL_VAD_FILTER
-        ),
+        # Partial은 반응성을 유지하고, Final은 Beamforming 잡음 구간을 한 번 더
+        # 제거한다. speech_pad로 문장 앞뒤 음절이 잘릴 가능성을 줄인다.
+        "vad_filter": vad_filter,
         "without_timestamps": True,
     }
-    if INITIAL_PROMPT:
+    if vad_filter:
+        options["vad_parameters"] = STREAMING_FINAL_VAD_PARAMETERS
+    # Partial에 prompt를 반복 주입하면 잡음에서도 전문용어가 화면에 나타날 수
+    # 있다. 전문 문맥은 발화 전체를 확인하는 Final에만 제한적으로 사용한다.
+    if INITIAL_PROMPT and not is_partial:
         options["initial_prompt"] = INITIAL_PROMPT
-    if HOTWORDS:
-        options["hotwords"] = HOTWORDS
     if is_partial:
         options.update(
             task=PARTIAL_TASK,
             temperature=PARTIAL_TEMPERATURE,
             condition_on_previous_text=PARTIAL_CONDITION_ON_PREVIOUS_TEXT,
         )
+    else:
+        options["condition_on_previous_text"] = FINAL_CONDITION_ON_PREVIOUS_TEXT
     segments, _ = model.transcribe(audio_input, **options)
-    return _normalize_segments(segments)
+    segment_list = list(segments)
+    if not is_partial:
+        segment_list = [
+            segment for segment in segment_list if _segment_is_confident(segment)
+        ]
+    text = _normalize_segments(segment_list)
+    if not is_partial and _looks_like_prompt_hallucination(text):
+        return ""
+    return text
 
 
 def _write_temporary_wav(audio: AudioArray, sample_rate: int) -> Path:
@@ -631,7 +721,7 @@ class _InferenceScheduler:
 
 
 class _AudioProcessor:
-    """RMS 발화 감지와 preview/전체 발화 buffer를 관리한다."""
+    """적응형 RMS 발화 감지와 preview/전체 발화 buffer를 관리한다."""
 
     def __init__(
         self,
@@ -642,6 +732,8 @@ class _AudioProcessor:
         preview_seconds: float,
         pre_roll_seconds: float,
         min_speech_duration: float,
+        noise_calibration_seconds: float,
+        noise_threshold_multiplier: float,
         scheduler: _InferenceScheduler,
     ) -> None:
         self._sample_rate = sample_rate
@@ -649,6 +741,12 @@ class _AudioProcessor:
         self._silence_threshold = silence_threshold
         self._silence_samples_required = max(1, round(silence_duration * sample_rate))
         self._minimum_speech_samples = max(1, round(min_speech_duration * sample_rate))
+        self._noise_calibration_samples = max(
+            0,
+            round(noise_calibration_seconds * sample_rate),
+        )
+        self._noise_threshold_multiplier = noise_threshold_multiplier
+        self._noise_floor: float | None = None
         self._scheduler = scheduler
 
         self._pre_roll = _SampleBuffer(round(pre_roll_seconds * sample_rate))
@@ -663,11 +761,25 @@ class _AudioProcessor:
     def process(self, audio: AudioArray) -> None:
         """한 chunk를 발화 상태와 두 buffer에 반영한다."""
 
-        is_voice = calculate_rms(audio) > self._silence_threshold
+        rms = calculate_rms(audio)
+        if self._noise_calibration_samples > 0 and not self._is_speaking:
+            # 시작 직후 배경음을 기준으로 삼아 Beamforming의 고정 잡음이 곧바로
+            # 발화로 등록되는 현상을 막는다. calibration 동안의 마지막 0.3초는
+            # pre-roll에 남겨 실제 첫 발화가 너무 잘리지 않도록 한다.
+            self._update_noise_floor(rms)
+            self._noise_calibration_samples = max(
+                0,
+                self._noise_calibration_samples - audio.size,
+            )
+            self._pre_roll.append(audio)
+            return
+
+        is_voice = rms > self._current_voice_threshold()
         if not self._is_speaking:
             if is_voice:
                 self._start_utterance(audio)
             else:
+                self._update_noise_floor(rms)
                 self._pre_roll.append(audio)
             return
 
@@ -687,6 +799,27 @@ class _AudioProcessor:
             self._samples_since_partial = 0
         if self._silence_samples >= self._silence_samples_required:
             self.finalize()
+
+    def _current_voice_threshold(self) -> float:
+        """고정 최소값과 측정 잡음 바닥을 결합한 발화 문턱을 반환한다."""
+
+        if self._noise_floor is None:
+            return self._silence_threshold
+        return max(
+            self._silence_threshold,
+            self._noise_floor * self._noise_threshold_multiplier,
+        )
+
+    def _update_noise_floor(self, rms: float) -> None:
+        """비발화 chunk의 RMS로 주변 잡음 바닥을 완만하게 갱신한다."""
+
+        if self._noise_floor is None:
+            self._noise_floor = rms
+            return
+        self._noise_floor = (
+            (1.0 - NOISE_FLOOR_SMOOTHING) * self._noise_floor
+            + NOISE_FLOOR_SMOOTHING * rms
+        )
 
     def finalize(self, completion: threading.Event | None = None) -> None:
         """침묵 또는 flush 시 현재 유효 발화를 final 요청으로 제출한다."""
@@ -775,6 +908,8 @@ class StreamingSTT:
         preview_seconds: float = DEFAULT_PREVIEW_SECONDS,
         pre_roll_seconds: float = DEFAULT_PRE_ROLL_SECONDS,
         min_speech_duration: float = DEFAULT_MIN_SPEECH_DURATION_SECONDS,
+        noise_calibration_seconds: float = DEFAULT_NOISE_CALIBRATION_SECONDS,
+        noise_threshold_multiplier: float = DEFAULT_NOISE_THRESHOLD_MULTIPLIER,
     ) -> None:
         """Streaming STT 설정과 lifecycle 상태를 초기화한다."""
 
@@ -786,11 +921,19 @@ class StreamingSTT:
             "silence_duration": silence_duration,
             "preview_seconds": preview_seconds,
             "min_speech_duration": min_speech_duration,
+            "noise_threshold_multiplier": noise_threshold_multiplier,
         }
         if any(value <= 0 for value in numeric_settings.values()):
             raise ValueError("sample_rate와 시간 설정은 0보다 커야 합니다.")
-        if silence_threshold < 0 or pre_roll_seconds < 0:
-            raise ValueError("silence_threshold와 pre_roll_seconds는 0 이상이어야 합니다.")
+        if (
+            silence_threshold < 0
+            or pre_roll_seconds < 0
+            or noise_calibration_seconds < 0
+        ):
+            raise ValueError(
+                "silence_threshold, pre_roll_seconds와 noise_calibration_seconds는 "
+                "0 이상이어야 합니다."
+            )
 
         self._sample_rate = sample_rate
         self._partial_interval = partial_interval
@@ -799,6 +942,8 @@ class StreamingSTT:
         self._preview_seconds = preview_seconds
         self._pre_roll_seconds = pre_roll_seconds
         self._min_speech_duration = min_speech_duration
+        self._noise_calibration_seconds = noise_calibration_seconds
+        self._noise_threshold_multiplier = noise_threshold_multiplier
 
         self._stats = _Stats(sample_rate)
         self._emitter = _ResultEmitter(on_result, self._stats)
@@ -865,6 +1010,8 @@ class StreamingSTT:
                 self._preview_seconds,
                 self._pre_roll_seconds,
                 self._min_speech_duration,
+                self._noise_calibration_seconds,
+                self._noise_threshold_multiplier,
                 scheduler,
             )
             scheduler.start()

@@ -129,8 +129,9 @@ Jetson에서 GitHub clone/pull, `project_main` 적용, 가상환경, CUDA 확인
 python -m unittest discover -s tests -v
 ```
 
-29개 테스트는 실제 Whisper 모델과 마이크 없이 입력 변환, lifecycle, callback,
-flush, 통계, partial/final 모델 분리와 평가 데이터·지표 계산을 검증합니다.
+33개 테스트는 실제 Whisper 모델과 마이크 없이 입력 변환, lifecycle, callback,
+flush, 적응형 잡음 문턱, 환각 차단, partial/final 모델 분리와 평가 데이터·지표
+계산을 검증합니다.
 
 ## 15. 실행 가능한 WAV 예제
 
@@ -155,7 +156,8 @@ stt.push_audio(beamformed_audio, sample_rate=16000)
 
 - 검증 환경: macOS, Python 3.12.13, faster-whisper 1.2.1, NumPy 2.5.1, CPU 추론
 - Jetson 실제 장치 실행은 아직이며 Mac 로컬과 정적 호환성만 점검했습니다.
-- 발화 종료는 외부 VAD가 아닌 RMS 임계값 방식입니다.
+- 발화 시작·종료는 시작 1초 잡음 보정과 적응형 RMS를 사용하며,
+  Final 추론에는 VAD와 신뢰도·환각 필터가 추가로 적용됩니다.
 - 다른 샘플레이트는 간단한 NumPy 선형 보간을 사용합니다.
 - 전체 발화는 final 정확도를 위해 침묵 또는 flush까지 메모리에 유지됩니다.
 - CPU에서는 partial/final latency가 실시간 입력 주기보다 길 수 있습니다.
@@ -163,7 +165,7 @@ stt.push_audio(beamformed_audio, sample_rate=16000)
 ## 18. 문의 또는 확인해야 할 사항
 
 - Beamforming 출력의 정확한 dtype, shape, sample rate와 chunk 주기
-- 환경별 무음 RMS에 맞춘 `silence_threshold`
+- 시작 1초간 배경음만 입력되는지와 Beamforming 잡음·클리핑 여부
 - 화자 전환 시 `flush()` 호출 주체
 - Jetson GPU의 `int8_float16` 실행 성능
 - Jetson CUDA와 CTranslate2의 실제 호환 조합

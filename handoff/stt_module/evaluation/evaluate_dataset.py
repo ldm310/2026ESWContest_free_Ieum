@@ -15,13 +15,12 @@ from typing import Any, Sequence, TypeVar
 
 from stt.config import (
     BEAM_SIZE,
-    HOTWORDS,
-    INITIAL_PROMPT,
     LANGUAGE,
     MODEL_SIZE,
     get_compute_type,
     get_device,
 )
+from stt.streaming import _run_model_transcription
 
 
 EVALUATION_ROOT = Path(__file__).resolve().parent
@@ -352,17 +351,13 @@ def evaluate(args: argparse.Namespace) -> Path:
         audio_seconds = wav_duration_seconds(audio_path)
         started_at = time.perf_counter()
         try:
-            segments, _ = model.transcribe(
+            # 실제 StreamingSTT Final과 동일한 prompt, VAD, 신뢰도 및 환각
+            # 차단 옵션을 사용해야 오프라인 점수가 production 동작을 반영한다.
+            hypothesis = _run_model_transcription(
+                model,
                 str(audio_path),
-                language=LANGUAGE,
-                beam_size=BEAM_SIZE,
-                vad_filter=False,
-                without_timestamps=True,
-                initial_prompt=INITIAL_PROMPT,
-                hotwords=HOTWORDS,
-            )
-            hypothesis = " ".join(
-                "".join(segment.text for segment in segments).split()
+                BEAM_SIZE,
+                False,
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - started_at) * 1_000
