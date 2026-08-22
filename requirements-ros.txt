@@ -1,0 +1,13 @@
+# 젯슨에서는 torch 를 이 파일로 깔지 말 것.
+# pip 기본 휠은 CUDA 를 못 쓴다. README 의 NVIDIA 인덱스를 써야 한다.
+#   pip3 install --index-url https://pypi.jetson-ai-lab.io/jp6/cu126 torch torchaudio
+torch>=2.0
+numpy>=1.24,<2
+scipy>=1.10
+
+# LoaderConfig 를 dataset_multi.py 에서 가져오기 때문에 따라온다.
+# 설정만 떼어내면 빼도 된다.
+soundfile>=0.12
+
+# 마이크 입력을 파이썬으로 직접 받을 때만 필요하다. ROS 오디오 드라이버를 쓰면 불필요.
+sounddevice>=0.4
