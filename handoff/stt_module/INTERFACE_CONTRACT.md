@@ -74,3 +74,7 @@ STTResult(
 `start()`와 `stop()`의 중복 호출은 안전합니다. start 전 또는 stop 후 입력은
 `RuntimeError`입니다. `flush()`는 침묵 timeout을 기다리지 않고 현재 발화를
 확정하며, final callback 완료까지 기다립니다.
+
+`start()` 이후 첫 1초는 Beamforming 배경 잡음의 RMS를 측정하는 calibration
+구간이다. 이 구간이 지난 뒤 말해야 첫 음절이 잘리지 않고 적응형 발화 문턱이
+정상적으로 적용된다.

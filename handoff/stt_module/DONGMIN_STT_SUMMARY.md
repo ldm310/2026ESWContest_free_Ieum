@@ -118,12 +118,13 @@ stt.stop()
 | 한국어 Final 자막 | 출력 확인 |
 | Callback overflow | 0회 |
 | 최대 Audio Queue | 1 |
-| 자동 테스트 | 20개 통과 |
+| 자동 테스트 | 33개 통과 |
 
-현재 Mac CPU 실행에서 한 전문용어 WAV의 Partial 추론은 평균 약
-`213.27ms`, Final 추론은 약 `1,568.70ms`였습니다. 합성 한국어 30문장
-평가에서는 CER `11.26%`, WER `18.14%`, 전문용어 정확도 `95.45%`가
-측정됐습니다. 합성 음성 결과이므로 실제 Jetson·ReSpeaker 성능과는 구분합니다.
+현재 Mac CPU 안전 설정에서 한 전문용어 WAV의 Partial 추론은 평균 약
+`225.08ms`, Final 추론은 약 `1,680.05ms`였습니다. 합성 한국어 30문장
+평가에서는 CER `13.43%`, WER `18.63%`, 전문용어 정확도 `72.73%`가
+측정됐고 전문용어 나열 환각과 빈 결과는 모두 0건이었습니다. 합성 음성
+결과이므로 실제 Jetson·ReSpeaker 성능과는 구분합니다.
 
 ## 아직 확인해야 하는 부분
 
@@ -132,7 +133,7 @@ stt.stop()
 - Beamforming 출력의 실제 dtype, shape, sample rate, chunk 크기
 - 문장 종료를 STT 내부 침묵 감지로 처리할지 외부에서 `flush()`할지 결정
 - UI에서 Partial 자막을 교체하고 Final 자막을 확정하는 방법
-- 평가용 정답 음성을 이용한 CER/WER 및 전문 용어 정확도 측정
+- 실제 ReSpeaker·Beamforming 녹음을 이용한 CER/WER 및 전문 용어 정확도 측정
 
 ## 팀원에게 필요한 핵심 내용
 
@@ -148,6 +149,6 @@ stt.stop()
 
 - `README.md`: 설치 및 전체 사용법
 - `INTERFACE_CONTRACT.md`: 정확한 입력·출력 규격
-- `WINDOWS_SETUP.md`: Windows 설치 방법
+- `JETSON_UBUNTU_SSH_SETUP.md`: SSH 접속 후 Jetson Ubuntu에서 GitHub 코드를 직접 받는 방법
 - `TROUBLESHOOTING.md`: 오류 해결 방법
 - `STT_EVALUATION_PLAN.md`: 성능 평가 기준

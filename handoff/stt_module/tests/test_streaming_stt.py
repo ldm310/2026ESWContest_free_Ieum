@@ -14,10 +14,13 @@ import numpy as np
 
 from stt import config
 from stt.streaming import (
+    DEFAULT_NOISE_CALIBRATION_SECONDS,
     DEFAULT_PARTIAL_INTERVAL_SECONDS,
     DEFAULT_PREVIEW_SECONDS,
     StreamingSTT,
+    _looks_like_prompt_hallucination,
     _run_model_transcription,
+    merge_partial,
     prepare_audio_array,
     resample_linear,
 )
@@ -83,6 +86,7 @@ class StreamingSTTTest(unittest.TestCase):
             preview_seconds=0.2,
             pre_roll_seconds=0.01,
             min_speech_duration=0.01,
+            noise_calibration_seconds=0.0,
         )
         stream.start()
         return stream, transcribe
@@ -99,14 +103,15 @@ class StreamingSTTTest(unittest.TestCase):
 
         self.assertEqual(DEFAULT_PARTIAL_INTERVAL_SECONDS, 0.25)
         self.assertEqual(DEFAULT_PREVIEW_SECONDS, 4.0)
+        self.assertEqual(DEFAULT_NOISE_CALIBRATION_SECONDS, 1.0)
         self.assertEqual(config.BEAM_SIZE, 3)
         with patch("stt.config.get_device", return_value="cuda"):
             self.assertEqual(config.get_compute_type(), "int8_float16")
         with patch("stt.config.get_device", return_value="cpu"):
             self.assertEqual(config.get_compute_type(), "int8")
 
-    def test_transcription_uses_prompt_and_hotwords(self) -> None:
-        """Partial과 Final 모두 프로젝트 전문용어 문맥을 전달한다."""
+    def test_transcription_uses_final_safety_options_without_hotwords(self) -> None:
+        """Final만 제한적 prompt와 VAD를 사용하고 hotwords는 주입하지 않는다."""
 
         model = Mock()
         model.transcribe.return_value = (
@@ -123,8 +128,118 @@ class StreamingSTTTest(unittest.TestCase):
         self.assertEqual(text, "전문용어 자막")
         options = model.transcribe.call_args.kwargs
         self.assertEqual(options["initial_prompt"], config.INITIAL_PROMPT)
-        self.assertEqual(options["hotwords"], config.HOTWORDS)
+        self.assertNotIn("hotwords", options)
         self.assertEqual(options["beam_size"], 3)
+        self.assertTrue(options["vad_filter"])
+        self.assertIn("vad_parameters", options)
+        self.assertFalse(options["condition_on_previous_text"])
+
+        model.transcribe.return_value = (
+            iter([SimpleNamespace(text=" 부분 자막 ")]),
+            object(),
+        )
+        _run_model_transcription(
+            model,
+            np.ones(1_600, dtype=np.float32),
+            beam_size=1,
+            is_partial=True,
+        )
+        partial_options = model.transcribe.call_args.kwargs
+        self.assertNotIn("initial_prompt", partial_options)
+        self.assertNotIn("hotwords", partial_options)
+        self.assertFalse(partial_options["vad_filter"])
+
+    def test_prompt_only_hallucinations_are_rejected(self) -> None:
+        """사진에서 확인된 전문용어 나열과 반복을 Final에서 차단한다."""
+
+        self.assertTrue(_looks_like_prompt_hallucination("BEM, MVDR, BEM, BEM"))
+        self.assertTrue(_looks_like_prompt_hallucination("CTranslate2"))
+        self.assertFalse(
+            _looks_like_prompt_hallucination(
+                "Jetson Orin Nano에서 한국어 자막을 실행합니다"
+            )
+        )
+
+        model = Mock()
+        model.transcribe.return_value = (
+            iter(
+                [
+                    SimpleNamespace(
+                        text=" BEM, MVDR, BEM ",
+                        avg_logprob=-0.2,
+                        no_speech_prob=0.1,
+                    )
+                ]
+            ),
+            object(),
+        )
+        self.assertEqual(
+            _run_model_transcription(
+                model,
+                np.ones(1_600, dtype=np.float32),
+                beam_size=3,
+                is_partial=False,
+            ),
+            "",
+        )
+
+    def test_conflicting_partial_is_replaced_instead_of_concatenated(self) -> None:
+        """서로 다른 tiny 가설을 이어 붙여 중복 자막을 만들지 않는다."""
+
+        self.assertEqual(
+            merge_partial(
+                "재생 오린 나노에서 한국어 실시간 자막 시스템을",
+                "Jetson Orin Nano에서 한국어 실시간 자막 시스템을 실행합니다",
+            ),
+            "Jetson Orin Nano에서 한국어 실시간 자막 시스템을 실행합니다",
+        )
+
+    def test_audio_conditioning_removes_dc_and_limits_peak(self) -> None:
+        """긴 Beamforming chunk의 DC와 범위 초과 peak를 보정한다."""
+
+        positions = np.arange(1_600, dtype=np.float32)
+        audio = 0.4 + 2.0 * np.sin(2 * np.pi * positions / 32)
+        prepared = prepare_audio_array(audio, 16_000, 16_000)
+        self.assertAlmostEqual(float(np.mean(prepared)), 0.0, places=5)
+        self.assertLessEqual(float(np.max(np.abs(prepared))), 1.0)
+
+    def test_noise_calibration_does_not_create_false_caption(self) -> None:
+        """지속 Beamforming 잡음은 발화로 등록하지 않고 실제 음성만 처리한다."""
+
+        results: list[STTResult] = []
+        transcribe = Mock(
+            side_effect=lambda model, audio, rate, beam, partial: (
+                "부분 자막" if partial else "최종 자막"
+            )
+        )
+        self.addCleanup(patch.stopall)
+        patch("stt.streaming._transcribe_audio", transcribe).start()
+        stream = StreamingSTT(
+            on_result=results.append,
+            sample_rate=1_000,
+            partial_interval=0.02,
+            silence_threshold=0.01,
+            silence_duration=0.02,
+            preview_seconds=0.2,
+            pre_roll_seconds=0.01,
+            min_speech_duration=0.01,
+            noise_calibration_seconds=0.06,
+            noise_threshold_multiplier=2.5,
+        )
+        stream.start()
+
+        noise = np.tile(np.array([0.02, -0.02], dtype=np.float32), 15)
+        for _ in range(4):
+            stream.push_audio(noise, sample_rate=1_000)
+        stream.flush()
+        self.assertFalse(any(result.type in {"partial", "final"} for result in results))
+
+        voice = np.tile(np.array([0.2, -0.2], dtype=np.float32), 15)
+        stream.push_audio(voice, sample_rate=1_000)
+        stream.push_audio(voice, sample_rate=1_000)
+        stream.push_audio(np.zeros(30, dtype=np.float32), sample_rate=1_000)
+        wait_until(lambda: any(result.type == "final" for result in results))
+        stream.stop()
 
     def test_push_before_start_raises(self) -> None:
         stream = StreamingSTT(lambda result: None)

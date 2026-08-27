@@ -70,9 +70,9 @@ INITIAL_PROMPT: str = (
     "화자 인식, 방향 추정, 빔포밍, DOA, MVDR, BEM"
 )
 
-# faster-whisper decoder가 프로젝트 전문용어를 후보로 우선 고려하도록 하는
-# 짧은 Hotword 목록이다. Initial Prompt와 함께 사용하되, 실제 음성에 없는
-# 문장을 생성하지 않도록 설명 문장이 아닌 핵심 용어만 쉼표로 구분한다.
+# 오프라인 전문용어 평가에서만 사용할 Hotword 목록이다. 실시간 마이크 입력에
+# 강제로 적용하면 잡음 구간에서 이 단어들을 음성으로 오인할 수 있으므로
+# StreamingSTT는 이 값을 모델 prompt로 전달하지 않고 환각 결과 판별에만 쓴다.
 HOTWORDS: str = (
     "Jetson Orin Nano, ReSpeaker, STT, DOA, MVDR, BEM, CUDA, CTranslate2, "
     "faster-whisper, Beamforming, GPU, RTF, Partial, Final"
