@@ -20,6 +20,7 @@ from beamform import (
 from bem import load_bem_dictionary, load_bem_steering
 from doa import estimate_bem_doa
 from runtime_protocol import (
+    AUDIO_CHUNK_SECONDS,
     AUDIO_UDP_ADDR,
     DIRECTION_UDP_ADDR,
     iter_audio_packets,
@@ -37,7 +38,9 @@ DOA_MIN_HZ, DOA_MAX_HZ = 1_000.0, 5_000.0
 MVDR_MIN_HZ = 1_250.0
 GRID_STEP_DEG = 5.0
 DIAGONAL_LOADING = 1e-2
-CHUNK_SEC = 0.5
+# StreamingSTT의 partial 주기와 맞춰 0.25초마다 Beamforming 결과를 보낸다.
+# 이전 0.5초 블록은 첫 partial 갱신을 최대 0.5초까지 늦출 수 있었다.
+CHUNK_SEC = AUDIO_CHUNK_SECONDS
 MAX_PENDING_CHUNKS = 2
 
 DEVICE_NAME = "ReSpeaker"
@@ -118,11 +121,11 @@ def resolve_input_device(sd, requested: str) -> int:
 
 
 class AudioChunkCollector:
-    """sounddevice 입력을 최신 0.5초 chunk 중심으로 유지한다."""
+    """sounddevice 입력을 최신 0.25초 chunk 중심으로 유지한다."""
 
     def __init__(self) -> None:
         # 처리 속도가 입력보다 느려져도 오래된 음성이 최대 4초씩 쌓이지 않게
-        # 1초 분량만 대기시킨다. 실시간 자막에서는 과거 입력 보존보다 현재
+        # 0.5초 분량만 대기시킨다. 실시간 자막에서는 과거 입력 보존보다 현재
         # 화자의 음성을 빠르게 전달하는 것이 중요하다.
         self.queue: queue.Queue[np.ndarray] = queue.Queue(
             maxsize=MAX_PENDING_CHUNKS

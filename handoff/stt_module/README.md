@@ -19,7 +19,7 @@ DOA·Beamforming 이후 mono 음성을 받아 faster-whisper 기반 한국어 pa
 stt_module/
 ├── stt/                # 핵심 API와 모델 설정
 ├── examples/           # NumPy, WAV, PCM16 연결 예제
-├── evaluation/         # Windows/macOS TTS 30문장 생성 및 CER/WER 평가
+├── evaluation/         # 합성 30문장·공개 실제 음성 100문장 준비 및 CER/WER 평가
 ├── tests/              # 실제 모델 없는 자동 테스트
 ├── sample_data/        # 사용자 WAV 배치 위치 안내
 ├── requirements-core.txt
@@ -129,9 +129,20 @@ Jetson에서 GitHub clone/pull, `project_main` 적용, 가상환경, CUDA 확인
 python -m unittest discover -s tests -v
 ```
 
-33개 테스트는 실제 Whisper 모델과 마이크 없이 입력 변환, lifecycle, callback,
+38개 테스트는 실제 Whisper 모델과 마이크 없이 입력 변환, lifecycle, callback,
 flush, 적응형 잡음 문턱, 환각 차단, partial/final 모델 분리와 평가 데이터·지표
 계산을 검증합니다.
+
+공개된 실제 한국어 낭독 음성 100개를 평가할 때는 Zeroth-Korean과 FLEURS의
+테스트 split에서 일상 어휘 문장을 각각 50개씩 준비한 뒤 기존 평가기를 실행한다.
+WAV와 결과 JSON은 Git에 포함되지 않는다.
+
+```bash
+python -m evaluation.prepare_open_korean_100
+python -m evaluation.evaluate_dataset \
+  --manifest evaluation/generated/open_korean_100/ground_truth.json \
+  --output evaluation/results/open_korean_100_small.json
+```
 
 ## 15. 실행 가능한 WAV 예제
 
