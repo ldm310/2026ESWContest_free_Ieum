@@ -1,8 +1,28 @@
 # Jetson UI 테스트 결과
 
+## 2026-08-27 지연시간 개선 로컬 회귀 테스트
+
+- Python 테스트: UI·통합 계약 6개, Streaming STT 38개 모두 통과
+- Python 문법 검사와 `run_jetson_ui.sh` 셸 문법 검사 통과
+- Beamforming 오디오 전달 계약: `0.5초 → 0.25초`
+- 외부 문장 종료 UDP 신호가 동일 `StreamingSTT.flush()`를 정확히 한 번 호출
+- 잘못된 종료 패킷은 무시하고 Final을 만들지 않음
+- 문장 끝 무음에서는 불필요한 Partial 추론을 새로 시작하지 않음
+- `small`, Final beam 3, CUDA `int8_float16`, Final VAD 설정 유지
+- 동일한 10ms 모의 추론 비교: 침묵 fallback `518.81ms`, 외부 flush
+  `12.86ms`, 종료 검출 대기 `505.95ms` 제거, 두 경로 모두 Final 1건
+- Mac CPU 실제 사람 낭독음성 100개 재평가: CER `8.22%`, WER `24.33%`,
+  평균 `1,816.06ms`, P95 `2,108.94ms`, RTF `0.1886`, 오류·빈 결과·중복 0건
+- 이전 동일 100문장 대비 CER·WER 변화 없음. 오프라인 파일 평가는 Streaming
+  종료 신호를 사용하지 않으므로 latency 차이는 실행 편차이며 개선 효과로 보지 않음
+- 로컬에는 ReSpeaker·Jetson GPU가 없으므로 실제 DOA 정확도와 Jetson P95는
+  장치에서 추가 측정 필요
+
+## 2026-08-18 UI 기준 결과
+
 - 테스트 일자: 2026-08-18
 - 대상 화면: 1024×600
-- Python 테스트: UI 4개, Streaming STT 21개 통과
+- 당시 Python 테스트: UI 4개, Streaming STT 21개 통과
 - 셸 구문 검사: 통과
 - 브라우저 오류: 0건
 - 렌더링 크기: 1024×600, 스크롤 없음
@@ -15,7 +35,7 @@
 - final 수신 및 녹음 중지: 활성 표시 해제 확인
 - 발화 중 DOA 후보 변경: 같은 utterance의 화자 번호 유지 확인
 - UI 상태 갱신 주기: 100ms
-- 0.5초 입력 chunk 기준 첫 partial: 705.99ms, `안녕하세요`
+- 당시 0.5초 입력 chunk 기준 첫 partial: 705.99ms, `안녕하세요`
 - final: 기준 문장과 일치, 추론 1591.03ms
 
 실제 Jetson, ReSpeaker 4채널 장치와 카메라가 테스트 환경에 연결되어 있지

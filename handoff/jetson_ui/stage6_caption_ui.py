@@ -31,8 +31,10 @@ from urllib.parse import urlparse
 from runtime_protocol import (
     AUDIO_UDP_ADDR,
     DIRECTION_UDP_ADDR,
+    SENTENCE_END_UDP_ADDR,
     unpack_audio_packet,
     unpack_direction,
+    unpack_sentence_end,
 )
 
 
@@ -296,6 +298,16 @@ class StreamingSTTService:
         if self._stt is not None:
             self._stt.push_audio(audio, sample_rate=STT_SAMPLE_RATE)
 
+    def flush(self) -> None:
+        """외부 문장 종료 신호를 현재 StreamingSTT 객체에 전달한다.
+
+        모델이나 StreamingSTT 객체를 새로 만들지 않고 UI가 계속 사용하던
+        동일 객체를 확정하므로, 누적된 발화가 중복 없이 final 한 건이 된다.
+        """
+
+        if self._stt is not None:
+            self._stt.flush()
+
     def stop(self) -> None:
         """대기 중인 final 추론까지 마친 뒤 모델을 정리한다."""
 
@@ -333,6 +345,11 @@ class RealtimeReceiver:
         self._threads = [
             threading.Thread(target=self._audio_loop, name="ui-audio-udp", daemon=True),
             threading.Thread(target=self._direction_loop, name="ui-direction-udp", daemon=True),
+            threading.Thread(
+                target=self._sentence_end_loop,
+                name="ui-sentence-end-udp",
+                daemon=True,
+            ),
         ]
         for thread in self._threads:
             thread.start()
@@ -405,6 +422,48 @@ class RealtimeReceiver:
                     continue
         finally:
             sock.close()
+
+    def _sentence_end_loop(self) -> None:
+        """외부 문장 종료 신호를 받으면 침묵 timeout 없이 final을 요청한다."""
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(0.5)
+        sock.bind(SENTENCE_END_UDP_ADDR)
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    packet, _ = sock.recvfrom(128)
+                except TimeoutError:
+                    continue
+                self._handle_sentence_end_packet(packet)
+        finally:
+            sock.close()
+
+    def _handle_sentence_end_packet(self, packet: bytes) -> bool:
+        """검증된 종료 패킷만 동일한 StreamingSTT 객체로 전달한다.
+
+        Args:
+            packet: 로컬 UDP socket에서 받은 payload.
+
+        Returns:
+            올바른 문장 종료 패킷을 처리했으면 ``True``.
+        """
+
+        try:
+            unpack_sentence_end(packet)
+        except ValueError:
+            return False
+        if not self._state.is_recording():
+            return True
+        try:
+            print("[문장 종료] 외부 신호를 받아 Final 처리를 시작합니다.", flush=True)
+            self._stt_service.flush()
+        except RuntimeError as exc:
+            # 정상 종료와 동시에 도착한 datagram은 프로그램을 죽이지 않는다.
+            if not self._stop_event.is_set():
+                self._state.set_status(error=f"문장 종료 처리 실패: {exc}")
+                print(f"[STT 오류] 문장 종료 처리 실패: {exc}", flush=True)
+        return True
 
 
 class OpenCVFaceDetector:

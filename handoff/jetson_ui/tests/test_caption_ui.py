@@ -11,10 +11,18 @@ from unittest.mock import Mock, patch
 
 from stage6_caption_ui import (
     CaptionHTTPServer,
+    RealtimeReceiver,
     RuntimeState,
+    StreamingSTTService,
     UIRequestHandler,
     open_kiosk,
     validate_runtime_files,
+)
+from runtime_protocol import (
+    AUDIO_CHUNK_SECONDS,
+    SENTENCE_END_PACKET,
+    pack_sentence_end,
+    unpack_sentence_end,
 )
 
 
@@ -181,6 +189,29 @@ class CaptionUITest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(payload), {"ok": True, "value": False})
         self.assertFalse(self.state.snapshot()["status"]["recording"])
+
+    def test_external_sentence_end_flushes_same_streaming_instance(self) -> None:
+        """외부 종료 신호는 UI가 사용 중인 STT 객체를 정확히 한 번 flush한다."""
+
+        stt_service = StreamingSTTService(self.state)
+        streaming_stt = Mock()
+        stt_service._stt = streaming_stt
+        receiver = RealtimeReceiver(self.state, stt_service, self.stop_event)
+
+        self.assertTrue(receiver._handle_sentence_end_packet(pack_sentence_end()))
+        streaming_stt.flush.assert_called_once_with()
+
+        self.assertFalse(receiver._handle_sentence_end_packet(b"invalid"))
+        streaming_stt.flush.assert_called_once_with()
+
+    def test_sentence_end_protocol_and_chunk_interval(self) -> None:
+        """0.25초 오디오 계약과 고정 문장 종료 payload를 검증한다."""
+
+        self.assertEqual(AUDIO_CHUNK_SECONDS, 0.25)
+        self.assertEqual(pack_sentence_end(), SENTENCE_END_PACKET)
+        self.assertIsNone(unpack_sentence_end(SENTENCE_END_PACKET))
+        with self.assertRaises(ValueError):
+            unpack_sentence_end(b"unknown-command")
 
     @patch("stage6_caption_ui.subprocess.Popen")
     @patch("stage6_caption_ui.shutil.which")

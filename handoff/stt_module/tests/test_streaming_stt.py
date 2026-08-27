@@ -380,6 +380,49 @@ class StreamingSTTTest(unittest.TestCase):
         wait_until(lambda: any(result.type == "final" for result in results))
         stream.stop()
 
+    def test_trailing_silence_does_not_start_partial_before_final(self) -> None:
+        """문장 끝 무음에서 불필요한 partial이 Final worker를 선점하지 않는다."""
+
+        results: list[STTResult] = []
+        transcribe = Mock(
+            side_effect=lambda model, audio, rate, beam, partial: (
+                "부분 자막" if partial else "최종 자막"
+            )
+        )
+        self.addCleanup(patch.stopall)
+        patch("stt.streaming._transcribe_audio", transcribe).start()
+        stream = StreamingSTT(
+            on_result=results.append,
+            sample_rate=1_000,
+            partial_interval=0.02,
+            silence_threshold=0.01,
+            silence_duration=0.2,
+            preview_seconds=0.2,
+            pre_roll_seconds=0.0,
+            min_speech_duration=0.01,
+            noise_calibration_seconds=0.0,
+        )
+        stream.start()
+        transcribe.reset_mock()  # start()의 두 모델 warm-up 호출은 제외한다.
+
+        voice = np.full(10, 0.2, dtype=np.float32)
+        stream.push_audio(voice, sample_rate=1_000)
+        stream.push_audio(voice, sample_rate=1_000)
+        stream.push_audio(np.zeros(10, dtype=np.float32), sample_rate=1_000)
+        wait_until(lambda: stream.get_stats()["current_audio_queue_size"] == 0)
+        time.sleep(0.03)
+
+        runtime_partial_calls = [
+            call for call in transcribe.call_args_list if call.args[4] is True
+        ]
+        self.assertEqual(runtime_partial_calls, [])
+
+        # 음성이 다시 이어지면 누적 간격을 즉시 반영해 partial을 생성한다.
+        stream.push_audio(voice, sample_rate=1_000)
+        wait_until(lambda: any(result.type == "partial" for result in results))
+        stream.flush()
+        stream.stop()
+
     def test_duplicate_partial_is_not_emitted(self) -> None:
         results: list[STTResult] = []
         stream, _ = self.make_stream(results.append)

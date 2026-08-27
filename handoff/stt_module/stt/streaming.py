@@ -792,7 +792,10 @@ class _AudioProcessor:
         else:
             self._silence_samples += audio.size
 
-        if self._samples_since_partial >= self._partial_samples_required:
+        # 무음이 시작된 뒤에는 곧 final 또는 외부 flush가 올 가능성이 높다.
+        # 이때 새 partial을 실행하면 단일 추론 worker를 점유해 final 시작을
+        # 늦출 수 있으므로, 실제 음성이 포함된 chunk에서만 partial을 요청한다.
+        if is_voice and self._samples_since_partial >= self._partial_samples_required:
             self._scheduler.submit_partial(
                 _InferenceRequest(self._utterance_id, self._preview.snapshot())
             )
