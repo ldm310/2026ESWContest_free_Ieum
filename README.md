@@ -19,13 +19,13 @@
 - `main`: 최종 통합 및 검증 완료 버전
 - `develop`: feature 결과 통합 및 테스트
 - `feature/byunghyun`: 병현님 담당 기능
-- `feature/junhyoung`: 준형님 담당 DOA, Beamforming, Jetson 연동
+- `feature/junhyeong`: 준형님 담당 DOA, Beamforming, Jetson 연동
 - `feature/dongmin`: 이동민 담당 Streaming Korean STT
 
 ## 담당 브랜치
 
 - 병현님: `feature/byunghyun`
-- 준형님: `feature/junhyoung`
+- 준형님: `feature/junhyeong`
 - 이동민: `feature/dongmin`
 
 ## 병합 흐름
