@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>DOA 디버그</title>
+<style>
+  :root{
+    --bg:#12151a; --panel:#191d24; --line:#2b313b; --text:#e6e9ef; --dim:#8c94a3;
+    --t1:#4da3ff; --t2:#ff9f43; --t3:#9b8cff; --ok:#38d39f; --warn:#ff5c7a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:13px/1.45 ui-monospace,"DejaVu Sans Mono",monospace}
+  header{display:flex;align-items:baseline;gap:14px;padding:10px 16px;
+         border-bottom:1px solid var(--line)}
+  h1{font-size:14px;margin:0;letter-spacing:.04em}
+  #state{color:var(--dim)}
+  #state.live{color:var(--ok)}
+  .grid{display:grid;gap:12px;padding:12px;
+        grid-template-columns:minmax(300px,1fr) minmax(340px,1.4fr)}
+  @media (max-width:840px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+  .panel h2{font-size:11px;margin:0 0 8px;color:var(--dim);
+            font-weight:600;letter-spacing:.10em;text-transform:uppercase}
+  canvas{display:block;width:100%}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{text-align:right;padding:3px 6px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500}
+  td:first-child,th:first-child{text-align:left}
+  .bar{height:9px;background:#232833;border-radius:2px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--t1)}
+  .row{display:grid;grid-template-columns:42px 1fr 74px;gap:8px;align-items:center;margin:5px 0}
+  .row span:last-child{text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+  .muted{color:var(--dim)}
+  .pipe{display:flex;align-items:stretch;gap:4px;flex-wrap:wrap}
+  .stage{flex:1 1 118px;min-width:118px;border:1px solid var(--line);border-radius:5px;
+         padding:7px 9px;background:#1d222a}
+  .stage .nm{font-size:10px;color:var(--dim);letter-spacing:.03em}
+  .stage .vl{font-size:19px;font-weight:700;margin:2px 0;font-variant-numeric:tabular-nums}
+  .stage .nt{font-size:10px;color:#6b7382}
+  .stage.ok{border-color:#2f6b56} .stage.ok .vl{color:var(--ok)}
+  .stage.stop{border-color:var(--warn);background:#241a1f} .stage.stop .vl{color:var(--warn)}
+  .stage.off .vl{color:#4a5568}
+  .arrow{align-self:center;color:#4a5568;font-size:17px}
+  .stopmsg{width:100%;margin:8px 0 0;color:var(--warn);font-size:12px}
+  .verdict{display:flex;align-items:center;gap:14px}
+  .verdict .big{font-size:44px;font-weight:700;line-height:1;min-width:56px;text-align:center}
+  .verdict .big.on{color:var(--ok)} .verdict .big.off{color:#39404d}
+.ctl{margin-left:auto;display:flex;gap:8px;align-items:center}
+.btn{background:#242a34;color:#e6e9ef;border:1px solid #39404c;border-radius:6px;
+     padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.btn:hover{background:#2e3540;border-color:#4a5261}
+.btn:active{transform:translateY(1px)}
+.btn.off{background:#5a2530;border-color:#8b3a48;color:#ffd7dd}
+.faceinfo{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline}
+.faceinfo b{font-size:22px;font-variant-numeric:tabular-nums}
+.faceinfo .k{color:#8c94a3;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>DOA 디버그</h1>
+  <span id="state">연결 중…</span>
+  <span class="muted" id="rate"></span>
+  <span class="ctl">
+    <button id="btnModel" class="btn">모델 끄기</button>
+    <button id="btnReset" class="btn">자막 리셋</button>
+    <span class="muted" id="ctlNote"></span>
+  </span>
+</header>
+
+<section class="panel" id="facePanel" style="margin:12px 12px 0">
+  <h2>카메라 · 화자 수 상한</h2>
+  <div id="faceInfo" class="faceinfo"></div>
+</section>
+
+<section class="panel" id="pipePanel" style="margin:12px 12px 0">
+  <h2>파이프라인</h2>
+  <div id="pipe" class="pipe"></div>
+</section>
+
+<div class="grid">
+  <section class="panel">
+    <h2>방향 (극좌표)</h2>
+    <canvas id="polar" height="340"></canvas>
+    <p class="muted" id="polarNote" style="margin:6px 0 0"></p>
+  </section>
+
+  <section class="panel">
+    <h2>방위각 · 고도각 시간축</h2>
+    <canvas id="tl" height="200"></canvas>
+    <h2 style="margin-top:12px">트랙</h2>
+    <table id="tracks"><thead>
+      <tr><th>ID</th><th>방위각</th><th>고도각</th><th>활성도</th><th>수명</th></tr>
+    </thead><tbody></tbody></table>
+  </section>
+
+  <section class="panel">
+    <h2>모델 원본 — 슬롯 활성도</h2>
+    <div id="slots"></div>
+    <h2 style="margin-top:12px">모델 원본 — 음원 개수 확률</h2>
+    <div id="count"></div>
+  </section>
+
+  <section class="panel">
+    <h2>마이크 입력 레벨</h2>
+    <div id="mics"></div>
+    <canvas id="lvl" height="150" style="margin-top:8px"></canvas>
+  </section>
+</div>
+
+<script>
+const TC = ['#4da3ff','#ff9f43','#9b8cff'];
+const HIST = 400;                    // 시간축에 남길 프레임 수
+const hist = [];                     // {t, tracks:[{id,az,el}]}
+const lvlHist = [];                  // [[ch1..ch4, ref], ...]
+let frames = 0, lastRate = performance.now();
+let modelOn = true;
+
+function post(action, note){
+  fetch('/control/' + action, {method:'POST'})
+    .then(r => r.json())
+    .then(j => { document.getElementById('ctlNote').textContent =
+                   j.ok ? note : '실패'; })
+    .catch(() => { document.getElementById('ctlNote').textContent = '통신 실패'; });
+}
+document.getElementById('btnReset').onclick = () => post('reset', '자막 리셋됨');
+document.getElementById('btnModel').onclick = () => {
+  modelOn = !modelOn;
+  const b = document.getElementById('btnModel');
+  b.textContent = modelOn ? '모델 끄기' : '모델 켜기';
+  b.classList.toggle('off', !modelOn);
+  post(modelOn ? 'model_on' : 'model_off', modelOn ? '모델 켜짐' : '모델 꺼짐');
+};
+
+function drawFaces(d){
+  const limit = d.face_limit;
+  const box = document.getElementById('faceInfo');
+  box.innerHTML =
+    '<span><span class="k">검출 얼굴</span> <b>' + (d.faces ?? 0) + '</b></span>' +
+    '<span><span class="k">최근 3초 최대</span> <b>' + (d.faces_hold ?? 0) + '</b></span>' +
+    '<span><span class="k">적용 상한</span> <b>' +
+      (limit === undefined || limit < 0 ? '미적용' : limit) + '</b></span>' +
+    '<span><span class="k">상한으로 버린 트랙</span> <b>' + (d.face_dropped ?? 0) + '</b></span>' +
+    '<span><span class="k">범위밖으로 버린 트랙</span> <b>' + (d.out_of_range ?? 0) + '</b></span>' +
+    '<span><span class="k">발행</span> <b>' + (d.published ?? 0) + '</b></span>';
+}
+
+function fit(c){                     // 캔버스를 화면 배율에 맞춘다
+  // 논리 높이는 처음 한 번만 읽어 둔다. canvas.height 에 값을 넣으면 속성도 같이
+  // 바뀌므로, 매번 속성을 다시 읽으면 프레임마다 배율이 곱해져 무한히 커진다.
+  if (c.dataset.h === undefined) c.dataset.h = c.getAttribute('height');
+  const logical = +c.dataset.h;
+  const r = window.devicePixelRatio || 1, w = Math.max(1, c.clientWidth);
+  if (c.width !== Math.round(w*r) || c.height !== Math.round(logical*r)){
+    c.width = Math.round(w*r); c.height = Math.round(logical*r);
+  }
+  c.style.height = logical + 'px';
+  const x = c.getContext('2d');
+  x.setTransform(r,0,0,r,0,0);
+  return [x, w, logical];
+}
+
+function drawPolar(tracks){
+  const [g,w,h] = fit(document.getElementById('polar'));
+  g.clearRect(0,0,w,h);
+  const cx=w/2, cy=h/2, R=Math.min(w,h)/2-38;
+  g.strokeStyle='#2b313b'; g.fillStyle='#8c94a3'; g.lineWidth=1;
+  for (const f of [0.25,0.5,0.75,1]){
+    g.beginPath(); g.arc(cx,cy,R*f,0,Math.PI*2); g.stroke();
+  }
+  g.font='11px ui-monospace,monospace'; g.textAlign='center'; g.textBaseline='middle';
+  // 규약은 두드림 실측으로 확정: +x 오른쪽, +y 정면, +z 위.
+  // 방위각은 atan2(y,x) 라 0도가 오른쪽, 90도가 정면. 화면 y축은 아래로 가므로 뒤집는다.
+  const NAMED = {0:'오른쪽', 90:'정면', 180:'왼쪽', 270:'후면'};
+  for (const a of [0,45,90,135,180,225,270,315]){
+    const r = a*Math.PI/180;
+    const x1=cx+Math.cos(r)*R, y1=cy-Math.sin(r)*R;
+    g.beginPath(); g.moveTo(cx,cy); g.lineTo(x1,y1);
+    g.strokeStyle = NAMED[a] ? '#39404d' : '#232833'; g.stroke();
+    const lx = cx+Math.cos(r)*(R+15), ly = cy-Math.sin(r)*(R+15);
+    if (NAMED[a]){
+      g.fillStyle='#c8cedb'; g.fillText(NAMED[a], lx, ly-6);
+      g.fillStyle='#6b7382'; g.fillText(a+'°', lx, ly+7);
+    } else {
+      g.fillStyle='#5a6472'; g.fillText(a+'°', lx, ly);
+    }
+  }
+  tracks.forEach((t,i)=>{
+    const r = t.az*Math.PI/180;
+    const rad = R*Math.max(0.12, Math.min(1, t.act));
+    const x1=cx+Math.cos(r)*rad, y1=cy-Math.sin(r)*rad;
+    g.strokeStyle=TC[i%3]; g.lineWidth=2;
+    g.beginPath(); g.moveTo(cx,cy); g.lineTo(x1,y1); g.stroke();
+    g.fillStyle=TC[i%3];
+    g.beginPath(); g.arc(x1,y1,5,0,Math.PI*2); g.fill();
+    g.fillStyle='#e6e9ef';
+    g.fillText('#'+t.id, x1, y1-13);
+  });
+  if (!tracks.length){
+    g.fillStyle='#8c94a3'; g.fillText('트랙 없음', cx, cy);
+  }
+}
+
+function drawTimeline(){
+  const [g,w,h] = fit(document.getElementById('tl'));
+  g.clearRect(0,0,w,h);
+  const mid=h/2;
+  g.strokeStyle='#2b313b'; g.lineWidth=1;
+  [0,0.25,0.5,0.75,1].forEach(f=>{
+    const y=f*h; g.beginPath(); g.moveTo(0,y); g.lineTo(w,y); g.stroke();
+  });
+  g.fillStyle='#8c94a3'; g.font='10px ui-monospace,monospace'; g.textAlign='left';
+  g.fillText('+180° / +90°', 4, 10); g.fillText('0°', 4, mid-3);
+  g.fillText('-180° / -90°', 4, h-4);
+  g.textAlign='right'; g.fillText('실선 방위각  점선 고도각', w-4, 10);
+
+  const ids = new Map();
+  hist.forEach(f => f.tracks.forEach(t => { if(!ids.has(t.id)) ids.set(t.id, ids.size); }));
+  const px = w/HIST;
+  for (const [id, idx] of ids){
+    for (const [key, dash, scale] of [['az',[],180],['el',[3,3],90]]){
+      g.setLineDash(dash); g.strokeStyle=TC[idx%3]; g.lineWidth=1.5;
+      g.beginPath(); let pen=false;
+      hist.forEach((f,i)=>{
+        const t=f.tracks.find(v=>v.id===id);
+        if(!t){ pen=false; return; }
+        const x=i*px, y=mid - (t[key]/scale)*(h/2-6);
+        pen ? g.lineTo(x,y) : g.moveTo(x,y); pen=true;
+      });
+      g.stroke();
+    }
+  }
+  g.setLineDash([]);
+}
+
+function drawLevels(){
+  const [g,w,h] = fit(document.getElementById('lvl'));
+  g.clearRect(0,0,w,h);
+  g.strokeStyle='#2b313b';
+  [0,0.5,1].forEach(f=>{ const y=f*h; g.beginPath(); g.moveTo(0,y); g.lineTo(w,y); g.stroke(); });
+  const px = w/HIST;
+  const cols = ['#4da3ff','#ff9f43','#9b8cff','#38d39f','#ff5c7a'];
+  for (let c=0;c<5;c++){
+    g.strokeStyle=cols[c]; g.lineWidth=1.4; g.beginPath();
+    lvlHist.forEach((v,i)=>{
+      // 로그 스케일. 1e-4 ~ 1e-1 을 화면 전체에 편다.
+      const db = 20*Math.log10(Math.max(v[c]||1e-9, 1e-9));
+      const y = h - ((db + 80)/80)*h;
+      i ? g.lineTo(i*px, y) : g.moveTo(i*px, y);
+    });
+    g.stroke();
+  }
+  g.fillStyle='#8c94a3'; g.font='10px ui-monospace,monospace'; g.textAlign='left';
+  g.fillText('-80 dB ~ 0 dB   ch1 ch2 ch3 ch4 ref', 4, 11);
+}
+
+function bars(el, items){
+  el.innerHTML = items.map(([label,v,color,text])=>`
+    <div class="row"><span>${label}</span>
+    <span class="bar"><i style="width:${Math.max(0,Math.min(100,v*100))}%;background:${color}"></i></span>
+    <span>${text}</span></div>`).join('');
+}
+
+function render(d){
+  drawFaces(d);
+  if (d.model_on !== undefined && d.model_on !== modelOn){
+    modelOn = d.model_on;                     // 다른 창에서 바꾼 상태를 따라간다
+    const b = document.getElementById('btnModel');
+    b.textContent = modelOn ? '모델 끄기' : '모델 켜기';
+    b.classList.toggle('off', !modelOn);
+  }
+  drawPolar(d.tracks || []);
+  drawTimeline();
+  drawLevels();
+
+  document.querySelector('#tracks tbody').innerHTML =
+    (d.tracks||[]).map((t,i)=>`<tr>
+      <td style="color:${TC[i%3]}">#${t.id}</td>
+      <td>${t.az.toFixed(1)}°</td><td>${t.el.toFixed(1)}°</td>
+      <td>${t.act.toFixed(2)}</td><td>${t.age.toFixed(1)}s</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">트랙 없음</td></tr>';
+
+  const thr = d.thr || 0;
+  const micMax = Math.max(...(d.mic||[0]));
+  const actMax = Math.max(...(d.activity||[0]));
+  const stages = [
+    ['1 마이크 입력', micMax > 1e-5, micMax.toFixed(5), '4채널 최대 RMS'],
+    ['2 모델 추론',   d.warm !== false, actMax.toFixed(2),
+                      d.warm === false ? '워밍업 중' : '슬롯 활성도 최대'],
+    ['3 활성도 문턱', (d.live||0) > 0, (d.live||0) + ' / 3',
+                      '문턱 ' + thr.toFixed(2) + ' 이상'],
+    ['4 방향 매칭',   (d.held||0) > 0, String(d.held||0), '추적 중 (미확정 포함)'],
+    ['5 연속 확인',   (d.confirmed||0) > 0, (d.hits||0) + ' / ' + (d.need||0),
+                      '연속 프레임 누적'],
+    ['6 레벨 게이트', d.open !== false, (d.ref||0).toFixed(5),
+                      '문턱 ' + (d.gate||0).toFixed(4)],
+    ['7 발행 트랙',   (d.tracks||[]).length > 0, String((d.tracks||[]).length), '화면에 뜨는 수'],
+  ];
+  // 처음으로 막힌 단계를 표시한다
+  const stop = stages.findIndex(st => !st[1]);
+  document.getElementById('pipe').innerHTML = stages.map(([name,ok,val,note],i)=>`
+    <div class="stage ${ok?'ok':(i===stop?'stop':'off')}">
+      <div class="nm">${name}</div>
+      <div class="vl">${val}</div>
+      <div class="nt">${note}</div>
+    </div>`).join('<div class="arrow">›</div>')
+    + (stop >= 0 ? `<p class="stopmsg">여기서 막힘 → <b>${stages[stop][0]}</b></p>` : '');
+
+  bars(document.getElementById('slots'),
+       (d.activity||[]).map((v,i)=>[
+         '슬롯'+(i+1), v,
+         v>thr ? TC[i%3] : '#39404d',
+         v.toFixed(3) + (v>thr ? ' ✓' : '')]));
+  bars(document.getElementById('count'),
+       (d.count||[]).map((v,i)=>[i+'개', v, v>0.5?'#5a6472':'#39404d', (100*v).toFixed(1)+'%']));
+  bars(document.getElementById('mics'),
+       (d.mic||[]).map((v,i)=>{
+         const db = 20*Math.log10(Math.max(v,1e-9));
+         return ['ch'+(i+1), (db+80)/80, db>-40?'#38d39f':(db>-60?'#4da3ff':'#4a5568'),
+                 db.toFixed(1)+' dB'];
+       }).concat(d.ref!==undefined ? [['ref',
+           (20*Math.log10(Math.max(d.ref,1e-9))+80)/80, '#ff9f43',
+           (20*Math.log10(Math.max(d.ref,1e-9))).toFixed(1)+' dB']] : []));
+}
+
+const es = new EventSource('/events');
+es.onopen = ()=>{ const s=document.getElementById('state'); s.textContent='연결됨'; s.className='live'; };
+es.onerror = ()=>{ const s=document.getElementById('state'); s.textContent='끊김 — 재연결 중'; s.className=''; };
+es.onmessage = ev => {
+  const d = JSON.parse(ev.data);
+  hist.push({t:d.t, tracks:d.tracks||[]});
+  while (hist.length > HIST) hist.shift();
+  lvlHist.push([...(d.mic||[0,0,0,0]), d.ref||0]);
+  while (lvlHist.length > HIST) lvlHist.shift();
+  render(d);
+  frames++;
+  const now = performance.now();
+  if (now - lastRate > 1000){
+    document.getElementById('rate').textContent =
+      (frames*1000/(now-lastRate)).toFixed(1) + ' Hz';
+    frames = 0; lastRate = now;
+  }
+};
+</script>
+</body>
+</html>
