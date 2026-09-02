@@ -24,7 +24,7 @@
 ## 담당 브랜치
 
 - 병현: `feature/byunghyun`
-- 준형: `feature/junhyoung`
+- 준형: `feature/junhyeong`
 - 이동민: `feature/dongmin`
 
 ## 병합 흐름
