@@ -111,7 +111,7 @@ class SttBridgeNode(Node):
         try:
             stt_model.get_model()
         except Exception as error:
-            self.get_logger().warn(f"모델 예열 실패, 첫 발화가 늦어진다: {error}")
+            self.get_logger().warn(f"모델 예열 실패: {error}")
             return
         elapsed = self.get_clock().now().nanoseconds / 1e9 - started
         self.get_logger().info(
@@ -123,7 +123,7 @@ class SttBridgeNode(Node):
             return session
         if len(self.sessions) >= self.max_tracks:
             self.get_logger().warn(
-                f"동시 트랙 {self.max_tracks}개 한도. track {track_id} 무시",
+                f"트랙 한도 {self.max_tracks}, track {track_id} 무시",
                 throttle_duration_sec=10.0)
             return None
 

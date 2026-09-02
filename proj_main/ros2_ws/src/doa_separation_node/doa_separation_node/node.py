@@ -116,7 +116,7 @@ class DoaSeparationNode(Node):
         self.raw_audio_channel = int(get("raw_audio_channel"))
 
         if len(self.mic_channels) != 4:
-            raise RuntimeError(f"mic_channels 는 4개여야 한다: {self.mic_channels}")
+            raise RuntimeError(f"mic_channels 4개 필요: {self.mic_channels}")
 
         self.net = StreamingJointNet(get("weights"), StreamConfig(
             sample_rate=self.sample_rate, chunk_frames=self.chunk_frames,
@@ -175,8 +175,7 @@ class DoaSeparationNode(Node):
         self.get_logger().info(
             f"가중치 epoch {self.net.epoch}, 조각 {self.chunk_samples}샘플 "
             f"({1000 * self.chunk_seconds:.0f} ms), 마이크 채널 {self.mic_channels}"
-            + ("  [원본 음성 모드 — 방향은 모델, STT 입력은 원본 채널 "
-               + str(self.raw_audio_channel) + "]" if self.raw_audio else ""))
+            + ("  [raw ch" + str(self.raw_audio_channel) + "]" if self.raw_audio else ""))
 
     def _open_stream(self, device_name: str, device_channels: int, blocksize: int,
                      pulse_source: str):
@@ -194,11 +193,10 @@ class DoaSeparationNode(Node):
             index = find_input_device(device_name, device_channels)
             if index is None:
                 self.get_logger().warn(
-                    f"'{device_name}' 을 찾지 못했다. 기본 입력장치를 쓴다. "
-                    f"채널 순서가 다를 수 있으니 방향을 확인해야 한다.")
+                    f"'{device_name}' 없음, 기본 입력장치 사용")
         if max(self.mic_channels) >= device_channels:
             raise RuntimeError(
-                f"mic_channels {self.mic_channels} 가 장치 채널 수 {device_channels} 를 넘는다")
+                f"mic_channels {self.mic_channels} > 장치 채널 {device_channels}개")
         stream = sd.InputStream(
             device=index, channels=device_channels, samplerate=self.sample_rate,
             dtype="float32", blocksize=blocksize, callback=self._audio_callback)
@@ -215,7 +213,7 @@ class DoaSeparationNode(Node):
         except queue.Full:
             self.dropped += 1
             self.get_logger().error(
-                f"큐가 찼다. 조각 {self.dropped}개 유실 — GRU 상태가 불연속이 된다.",
+                f"큐 초과, {self.dropped}개 유실",
                 throttle_duration_sec=5.0)
 
     def _work(self) -> None:

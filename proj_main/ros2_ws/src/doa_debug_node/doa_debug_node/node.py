@@ -140,9 +140,6 @@ class DoaDebugNode(Node):
         self.server.daemon_threads = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.get_logger().info(f"DOA 디버그 UI http://{host}:{port}")
-        if host == "127.0.0.1":
-            self.get_logger().info(
-                f"원격은 터널로: ssh -N -L {port}:localhost:{port} <호스트>")
 
     def _control(self, action: str) -> bool:
         if action == "reset":

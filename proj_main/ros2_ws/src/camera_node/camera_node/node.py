@@ -113,8 +113,7 @@ class CameraNode(Node):
             f"RealSense {self.width}x{self.height}  화각 {horizontal:.1f}x{vertical:.1f}도  "
             f"lateral_sign {self.lateral_sign:+.0f}  렌즈오프셋 {list(self.cam_offset)}")
         self.get_logger().warn(
-            "정합 상수를 실측하지 않았다면 좌우가 뒤집힐 수 있다. "
-            "알고 있는 방향에서 소리를 내어 lateral_sign 부호를 확인할 것.")
+            "lateral_sign 미검증")
 
     def _on_tracks(self, message: SoundSourceTracks) -> None:
         with self.lock:

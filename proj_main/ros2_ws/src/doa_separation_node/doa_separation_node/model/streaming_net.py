@@ -47,8 +47,7 @@ class StreamingJointNet:
         net_config = state["config"]
         if "d_state" not in net_config:
             raise ValueError(
-                f"{checkpoint} 은 v3 체크포인트가 아니다 (d_state 없음). "
-                "v2 는 마이크 배열이 달라 이 프로젝트에서 지원하지 않는다.")
+                f"{checkpoint}: v3 체크포인트 아님")
 
         self.input_rate = self.config.sample_rate
         self.config.sample_rate = MODEL_RATE
