@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#f8f9fb" />
+    <title>실시간 화자 인식</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="screen-stage">
+      <section class="device-screen" id="device-screen">
+        <header class="topbar">
+          <div class="brand-block">
+            <h1>실시간 화자 인식</h1>
+            <span class="online-dot" aria-hidden="true"></span>
+            <strong id="system-power">ON</strong>
+          </div>
+
+          <div class="top-actions">
+            <button class="control-button" id="model-button" type="button" aria-pressed="true">
+              <span>DOA 모델</span>
+              <span class="toggle on" id="model-toggle" aria-hidden="true"><span></span></span>
+            </button>
+            <button class="control-button" id="stt-button" type="button" aria-pressed="true">
+              <span>STT 입력</span>
+              <strong id="stt-label">마이크 직접</strong>
+            </button>
+            <button class="control-button" id="reset-button" type="button">
+              자막 리셋
+            </button>
+            <button class="control-button settings-button" id="settings-button" type="button" aria-expanded="false">
+              설정 <span aria-hidden="true">⚙</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="workspace">
+          <section class="left-column" aria-label="화자 영상 및 상태">
+            <div class="camera-card">
+              <img id="camera-stream" class="camera-stream is-hidden" alt="연결된 카메라의 실시간 영상" />
+              <div class="camera-placeholder" id="camera-placeholder">
+                <span class="large-camera-icon" aria-hidden="true"></span>
+                <strong>실시간 카메라 화면</strong>
+                <p id="camera-message">카메라 연결을 기다리는 중입니다.</p>
+              </div>
+              <div class="face-layer" id="face-layer" aria-live="polite"></div>
+              <div class="camera-label"><span id="camera-light"></span> CAMERA 01</div>
+            </div>
+
+            <div class="speaker-panel">
+              <div class="panel-heading"><h2>활성 화자</h2></div>
+              <div class="speaker-cards" id="speaker-cards">
+                <article class="speaker-card" data-speaker-id="1" style="--speaker-color:#2878f0;--speaker-soft:#eaf2ff">
+                  <span class="avatar-icon" aria-hidden="true"><span></span></span>
+                  <span class="speaker-card-content">
+                    <strong>화자 1</strong>
+                    <span class="audio-line"><span class="audio-icon" aria-hidden="true"><i></i></span><span class="waveform" aria-hidden="true"></span></span>
+                  </span>
+                </article>
+                <article class="speaker-card" data-speaker-id="2" style="--speaker-color:#20b45a;--speaker-soft:#e8f8ef">
+                  <span class="avatar-icon" aria-hidden="true"><span></span></span>
+                  <span class="speaker-card-content">
+                    <strong>화자 2</strong>
+                    <span class="audio-line"><span class="audio-icon" aria-hidden="true"><i></i></span><span class="waveform" aria-hidden="true"></span></span>
+                  </span>
+                </article>
+                <article class="speaker-card" data-speaker-id="3" style="--speaker-color:#ff9818;--speaker-soft:#fff3e2">
+                  <span class="avatar-icon" aria-hidden="true"><span></span></span>
+                  <span class="speaker-card-content">
+                    <strong>화자 3</strong>
+                    <span class="audio-line"><span class="audio-icon" aria-hidden="true"><i></i></span><span class="waveform" aria-hidden="true"></span></span>
+                  </span>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <section class="caption-card" aria-label="실시간 자막">
+            <div class="caption-heading">
+              <div><span class="eyebrow">LIVE TRANSCRIPT</span><h2>실시간 자막</h2></div>
+            </div>
+            <div class="caption-list" id="caption-list" aria-live="polite">
+              <div class="empty-caption" id="empty-caption">한국어 자막을 기다리는 중입니다.</div>
+            </div>
+            <div class="recognition-status">
+              <span class="status-indicator idle" id="recognition-indicator" aria-hidden="true"></span>
+              <span id="recognition-label">음성 입력을 기다리는 중</span>
+            </div>
+          </section>
+        </div>
+
+        <footer class="statusbar">
+          <span><i class="connection-dot" id="microphone-dot" aria-hidden="true"></i><span id="microphone-status">마이크 4채널 연결 대기</span></span>
+          <span><i class="connection-dot" id="camera-dot" aria-hidden="true"></i><span id="camera-status">카메라 연결 대기</span></span>
+          <span class="system-running"><i class="connection-dot" id="runtime-dot" aria-hidden="true"></i><span id="runtime-status">DOA · 화자 인식 · STT 준비 중</span></span>
+        </footer>
+
+        <aside class="settings-popover" id="settings-popover" hidden>
+          <div class="popover-title"><strong>화면 설정</strong><button id="settings-close" type="button" aria-label="설정 닫기">×</button></div>
+          <label><span>큰 자막 사용</span><input id="large-text-input" type="checkbox" /></label>
+          <p>Jetson 터치 화면에 최적화된 레이아웃</p>
+        </aside>
+
+        <div class="error-toast" id="error-toast" role="alert" hidden></div>
+      </section>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>doa_debug_node</name>
+  <version>0.1.0</version>
+  <description>DOA 디버깅용 웹 UI. 방향, 활성도, 음원 개수, 마이크 채널 레벨을 브라우저로 본다.</description>
+  <maintainer email="wnsgud8698@gmail.com">junhyeong</maintainer>
+  <license>MIT</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>captioning_msgs</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

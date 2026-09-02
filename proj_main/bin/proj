@@ -1,0 +1,54 @@
+#!/bin/bash
+WS=$HOME/proj_main/ros2_ws
+LOG=$HOME/proj_main/log
+mkdir -p $LOG
+source /opt/ros/humble/setup.bash
+[ -f $WS/install/setup.bash ] && source $WS/install/setup.bash
+
+case "$1" in
+start)
+  shift
+  if pgrep -f "captioning.launch.py" >/dev/null; then echo "이미 떠 있다. proj stop 먼저."; exit 1; fi
+  F=$LOG/run_$(date +%Y%m%d_%H%M%S).log
+  setsid ros2 launch ui_bridge_node captioning.launch.py "$@" > $F 2>&1 < /dev/null &
+  echo "시작 -> $F"
+  sleep 12
+  ros2 node list 2>/dev/null | sed "s/^/  /"
+  ;;
+stop)
+  pkill -f "captioning.launch.py"; sleep 2
+  pkill -f "doa_separation|stt_bridge|ui_bridge|camera_node|doa_debug" 2>/dev/null
+  echo "정지"
+  ;;
+status)
+  echo "--- 프로세스"; pgrep -af "captioning.launch.py|doa_separation|stt_bridge|ui_bridge|camera|doa_debug" | cut -c1-110
+  echo "--- 노드"; timeout 8 ros2 node list 2>/dev/null
+  echo "--- 토픽"; timeout 8 ros2 topic list 2>/dev/null
+  echo "--- 포트"; ss -tln 2>/dev/null | grep -E "8765|8770"
+  echo "--- 자원"; free -m | sed -n 2p; uptime | tr -s " "
+  nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader 2>/dev/null
+  ;;
+ui)
+  DISPLAY=${DISPLAY:-:1} XAUTHORITY=${XAUTHORITY:-/run/user/1000/gdm/Xauthority}     setsid chromium-browser --kiosk --app=http://127.0.0.1:${2:-8765} >/dev/null 2>&1 &
+  echo "UI -> http://127.0.0.1:${2:-8765}"
+  ;;
+rec)
+  D=$LOG/bag_$(date +%Y%m%d_%H%M%S)
+  echo "녹화 -> $D   (Ctrl+C 로 정지)"
+  ros2 bag record -o $D /sound_source_tracks /separated_audio /faces     /caption /camera/compressed /doa_debug
+  ;;
+log)   tail -f $(ls -t $LOG/run_*.log | head -1) ;;
+last)  tail -${2:-60} $(ls -t $LOG/run_*.log | head -1) ;;
+hz)    timeout ${3:-8} ros2 topic hz ${2:-/sound_source_tracks} 2>&1 | tail -4 ;;
+echo)  timeout ${3:-6} ros2 topic echo --once ${2:-/sound_source_tracks} 2>&1 | head -40 ;;
+tracks) timeout ${2:-10} ros2 topic echo /sound_source_tracks 2>&1 | head -60 ;;
+debug) timeout ${2:-6} ros2 topic echo --once /doa_debug 2>&1 | head -30 ;;
+caption) timeout ${2:-15} ros2 topic echo /caption 2>&1 | head -40 ;;
+weights) python3 -c "
+import torch,glob
+for p in sorted(glob.glob('$WS/install/doa_separation_node/share/doa_separation_node/weights/*.pt')):
+    s=torch.load(p,map_location='cpu',weights_only=False)
+    m=s.get('metrics',{})
+    print(p.split('/')[-1],' epoch',s.get('epoch'),' MAE',round(m.get('mae',float('nan')),2))" ;;
+*) echo "사용법: proj {start|ui|rec|stop|status|log|last N|hz TOPIC|echo TOPIC|tracks|debug|caption|weights}" ;;
+esac
